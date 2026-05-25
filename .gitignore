@@ -6,6 +6,9 @@ credentials.json
 *.json
 !requirements*.txt
 
+# Streamlit secrets (로컬용, 절대 올리면 안 됨)
+.streamlit/secrets.toml
+
 # Python
 __pycache__/
 *.pyc

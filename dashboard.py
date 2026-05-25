@@ -45,6 +45,38 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# ── 비밀번호 인증 ────────────────────────────────────────────────────
+def check_password():
+    correct_pw = st.secrets.get("dashboard_password", "nominical2026")
+
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if st.session_state.authenticated:
+        return True
+
+    st.markdown("""
+    <div style="max-width:360px;margin:15vh auto 0;text-align:center;">
+        <div style="font-size:36px;margin-bottom:8px;">🏃</div>
+        <div style="font-size:22px;font-weight:700;color:#1A1A1A;margin-bottom:4px;">NOMINICAL</div>
+        <div style="font-size:13px;color:#8C8C8C;margin-bottom:32px;">성과 대시보드</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col = st.columns([1, 2, 1])[1]
+    with col:
+        pw = st.text_input("비밀번호", type="password", placeholder="비밀번호 입력")
+        if st.button("로그인", use_container_width=True):
+            if pw == correct_pw:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("비밀번호가 틀렸어요.")
+    return False
+
+if not check_password():
+    st.stop()
+
 # ── 커스텀 CSS ──────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -161,6 +193,18 @@ def load_data():
         lambda r: round(r["매출"] / r["광고비"], 2) if r["광고비"] > 0 and r["매출"] > 0 else 0, axis=1
     )
 
+    # 날짜 파싱 (M/D → datetime)
+    def parse_date(s):
+        try:
+            parts = str(s).strip().split("/")
+            return pd.Timestamp(f"2026-{int(parts[0]):02d}-{int(parts[1]):02d}")
+        except:
+            return pd.NaT
+    result["날짜_dt"] = result["날짜"].apply(parse_date)
+    result["주차"] = result["날짜_dt"].apply(
+        lambda d: f"{d.month}월 {((d.day - 1) // 7) + 1}주차" if pd.notna(d) else ""
+    )
+
     # 데이터 있는 날짜만
     result = result[result["방문자"] > 0].reset_index(drop=True)
     return result
@@ -190,18 +234,45 @@ def chart_container(title, subtitle=""):
 
 
 # ── 메인 ───────────────────────────────────────────────────────────
-df = load_data()
+df_all = load_data()
 
 # 헤더
 col_logo, col_refresh = st.columns([6, 1])
 with col_logo:
     st.markdown("## 🏃 NOMINICAL 성과 대시보드")
-    st.markdown(f'<span style="color:#8C8C8C;font-size:13px;">데이터 기준: {df["날짜"].iloc[0]} ~ {df["날짜"].iloc[-1]} | {len(df)}일</span>', unsafe_allow_html=True)
 with col_refresh:
     if st.button("🔄 새로고침"):
         st.cache_data.clear()
         st.rerun()
 
+st.markdown("---")
+
+# ── 기간 필터 ────────────────────────────────────────────────────────
+weeks = ["전체 기간"] + sorted(df_all["주차"].unique().tolist(), key=lambda x: df_all[df_all["주차"]==x]["날짜_dt"].iloc[0])
+
+col_f1, col_f2, col_f3 = st.columns([2, 2, 4])
+with col_f1:
+    preset = st.selectbox("📅 조회 기간", ["전체 기간", "최근 7일", "최근 14일"] + [w for w in weeks if "주차" in w], label_visibility="collapsed")
+with col_f2:
+    if preset == "전체 기간":
+        period_label = f"전체 {len(df_all)}일"
+    elif "주차" in preset:
+        period_label = f"📆 {preset}"
+    else:
+        n = int(preset.replace("최근 ", "").replace("일", ""))
+        period_label = f"최근 {n}일"
+    st.markdown(f'<div style="padding:8px 0;color:#8C8C8C;font-size:13px;">{period_label} 기준</div>', unsafe_allow_html=True)
+
+# 필터 적용
+if preset == "전체 기간":
+    df = df_all.copy()
+elif "주차" in preset:
+    df = df_all[df_all["주차"] == preset].copy()
+else:
+    n = int(preset.replace("최근 ", "").replace("일", ""))
+    df = df_all.tail(n).copy()
+
+df = df.reset_index(drop=True)
 st.markdown("---")
 
 # ── KPI 카드 행 ─────────────────────────────────────────────────────
@@ -476,6 +547,115 @@ with st.expander("📊 일별 채널 유입 상세 보기"):
             hovermode="x unified",
         )
         st.plotly_chart(fig5, use_container_width=True)
+
+# ── 기간 인사이트 분석 ──────────────────────────────────────────────
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("---")
+chart_container("🔍 기간 종합 인사이트", f"{df['날짜'].iloc[0]} ~ {df['날짜'].iloc[-1]} | {len(df)}일 분석")
+
+def generate_period_insight(df):
+    insights = []
+    if df.empty or df["방문자"].sum() == 0:
+        return ["데이터가 없어요."]
+
+    total_vis   = int(df["방문자"].sum())
+    total_conv  = int(df["구매"].sum())
+    total_spend = int(df["광고비"].sum())
+    total_rev   = int(df["매출"].sum())
+    total_new   = int(df["신규"].sum())
+    total_ret   = int(df["재방문"].sum())
+    ad_days_cnt = int((df["광고비"] > 0).sum())
+    conv_days   = df[df["구매"] > 0]
+    ad_df       = df[df["광고비"] > 0]
+
+    # ① 전체 성과 요약
+    cvr = round(total_conv / total_vis * 100, 2) if total_vis > 0 else 0
+    roas = round(total_rev / total_spend, 1) if total_spend > 0 else 0
+    cpo  = round(total_spend / total_conv) if total_conv > 0 else 0
+    insights.append(
+        f"**📊 기간 성과 요약**\n"
+        f"방문자 {total_vis:,}명에서 {total_conv}건 전환 (전환율 {cvr}%). "
+        f"{'광고비 ' + str(f'{total_spend:,}원') + ' 투입, ROAS ' + str(roas) + '배 달성.' if total_spend > 0 else '광고 미집행 기간.'}"
+    )
+
+    # ② 트래픽 스파이크 분석
+    if len(df) > 1:
+        max_day = df.loc[df["방문자"].idxmax()]
+        avg_vis = df["방문자"].mean()
+        if max_day["방문자"] > avg_vis * 2.5:
+            top_ch = max({"메타광고": max_day["유입_메타"], "공식인스타": max_day["유입_공식"],
+                          "개인인스타": max_day["유입_개인"], "직접방문": max_day["유입_직접"]}, key=lambda k: {"메타광고": max_day["유입_메타"], "공식인스타": max_day["유입_공식"], "개인인스타": max_day["유입_개인"], "직접방문": max_day["유입_직접"]}[k])
+            new_pct = round(max_day["신규"] / max_day["방문자"] * 100) if max_day["방문자"] > 0 else 0
+            insights.append(
+                f"**📈 최대 트래픽 스파이크: {max_day['날짜']}**\n"
+                f"평균({int(avg_vis):,}명) 대비 {round(max_day['방문자']/avg_vis, 1)}배 급등. "
+                f"주요 유입: {top_ch}. 신규 비중 {new_pct}% — "
+                f"{'바이럴/콘텐츠 확산으로 신규 유입이 대부분. cold audience라 당일 전환은 낮지만 픽셀 모수 대거 확충.' if new_pct >= 80 else '기존 팔로워 + 신규 혼합 유입. 전환 가능성 상대적으로 높은 날.'}"
+            )
+
+    # ③ 전환 패턴 분석
+    if total_conv > 0 and not conv_days.empty:
+        best_conv = conv_days.loc[conv_days["구매"].idxmax()]
+        ret_on_conv = conv_days["재방문"].mean()
+        ret_overall = df["재방문"].mean()
+        insights.append(
+            f"**🛍 전환 패턴**\n"
+            f"총 {total_conv}건 전환, {len(conv_days)}일에 분산 발생. "
+            f"최다 전환일: {best_conv['날짜']} ({int(best_conv['구매'])}건). "
+            + (f"전환 발생일의 재방문자 평균({ret_on_conv:.0f}명)이 전체 평균({ret_overall:.0f}명)보다 높음 → "
+               f"한 번 본 후 재방문해서 결제하는 패턴 확인. 리타게팅 효과 작동 중." if ret_on_conv > ret_overall * 1.1 else
+               f"신규 방문자가 전환까지 바로 이어지는 케이스도 포함 — 콘텐츠/프로모션 직접 구매 설득력 있음.")
+        )
+    elif total_conv == 0 and total_spend > 0:
+        avg_bounce = df["이탈율"].mean()
+        insights.append(
+            f"**⚠️ 전환 0건 구간**\n"
+            f"광고비 {total_spend:,}원 집행했으나 전환 없음. "
+            f"평균 이탈율 {avg_bounce:.0f}% — "
+            + (f"이탈율이 높아 랜딩 직후 이탈이 주요 원인. 소재와 상품페이지 메시지 일관성 점검 필요." if avg_bounce >= 60
+               else f"이탈율은 양호하나 결제 미전환 — 가격 저항, 배송비, 리뷰 부족 등 결제 직전 장벽 점검 필요.")
+        )
+
+    # ④ 채널 효율 분석
+    ch_totals = {
+        "메타광고":   int(df["유입_메타"].sum()),
+        "공식인스타": int(df["유입_공식"].sum()),
+        "개인인스타": int(df["유입_개인"].sum()),
+        "직접방문":   int(df["유입_직접"].sum()),
+    }
+    top_ch = max(ch_totals, key=ch_totals.get)
+    ch_str = " | ".join([f"{k} {v:,}명" for k, v in sorted(ch_totals.items(), key=lambda x: -x[1]) if v > 0])
+    direct_trend = "직접방문이 꾸준히 유입되는 것은 브랜드 인지도가 쌓이고 있는 긍정 신호." if ch_totals["직접방문"] >= 50 else ""
+    insights.append(
+        f"**🔀 채널 기여 분석**\n"
+        f"{ch_str}. 이 기간 {top_ch}이 유입 1위. "
+        + (f"메타 광고 UTM 포착률 확인 필요 — 광고 클릭 대비 GA4 메타 유입 세션이 낮으면 UTM 파라미터 누락." if top_ch != "메타광고" and total_spend > 0 else "")
+        + (" " + direct_trend if direct_trend else "")
+    )
+
+    # ⑤ 픽셀 모수 & 리타게팅 액션플랜
+    if total_new >= 100:
+        insights.append(
+            f"**🎯 리타게팅 액션플랜**\n"
+            f"이 기간 신규 유입 {total_new:,}명으로 픽셀 모수 확충. "
+            f"재방문율 {round(total_ret/(total_new+total_ret)*100) if (total_new+total_ret)>0 else 0}% — "
+            f"나머지 {total_new - total_ret:,}명은 아직 재방문 안 함. "
+            f"이 모수를 대상으로 '프리오더 마감 임박' 또는 '재고 한정' 메시지로 리타게팅 집행 시 전환율 3~5배 기대 가능."
+        )
+
+    return insights
+
+period_insights = generate_period_insight(df)
+for i, insight in enumerate(period_insights):
+    border_colors = [COLOR["blue"], COLOR["accent"], COLOR["green"], COLOR["orange"], COLOR["purple"]]
+    bc = border_colors[i % len(border_colors)]
+    st.markdown(f"""
+    <div style="background:#FFFFFF;border-left:4px solid {bc};padding:16px 20px;border-radius:8px;
+                font-size:13px;color:#1A1A1A;margin-bottom:12px;border:1px solid #EBEBEB;
+                box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+    {insight.replace(chr(10), "<br>")}
+    </div>
+    """, unsafe_allow_html=True)
 
 # ── 푸터 ───────────────────────────────────────────────────────────
 st.markdown("---")
