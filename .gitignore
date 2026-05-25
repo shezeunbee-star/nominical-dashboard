@@ -1,0 +1,18 @@
+# 민감한 인증 파일 — 절대 GitHub에 올라가면 안 됨
+token.json
+service_account.json
+meta_token.txt
+credentials.json
+*.json
+!requirements*.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# 로컬 데이터
+*.xlsx
+*.xls
+*.csv
