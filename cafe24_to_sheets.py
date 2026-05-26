@@ -14,7 +14,8 @@ TOKEN_FILE     = os.path.join(BASE_DIR, "cafe24_token.json")
 GSHEET_TOKEN   = os.path.join(BASE_DIR, "token.json")
 SPREADSHEET_ID = "1y9mZirj81sR2tkkGV_wTzFvJonPdJU-JuErSRDo_73E"
 SHEET_NAME     = "🏬 플랫폼 매출"
-COMMISSION     = 30
+COMMISSION_DEFAULT = 30
+COMMISSION_CAFE24   = 3   # PG 수수료만 (자사몰)
 API_VERSION    = "2026-03-01"
 
 # 무신사 market_id (연동 주문 확인 후 업데이트)
@@ -129,14 +130,15 @@ def parse_orders(orders):
             qty    = int(float(item.get("quantity", 1) or 1))
             price  = int(float(item.get("product_price", 0) or 0))
             total  = price * qty
-            profit = round(total * (1 - COMMISSION / 100))
+            comm   = COMMISSION_CAFE24 if platform == "Cafe24" else COMMISSION_DEFAULT
+            profit = round(total * (1 - comm / 100))
 
             rows.append([
                 platform, order_date,
                 str(item.get("product_name", "-")),
                 str(item.get("product_code", "-")),
                 color, size, qty, total,
-                COMMISSION, profit, status
+                comm, profit, status
             ])
     return rows
 

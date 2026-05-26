@@ -346,7 +346,7 @@ with col_refresh:
 st.markdown("---")
 
 # ── 탭 분기 ──────────────────────────────────────────────────────
-tab1, tab2 = st.tabs(["📊 방문자 · 광고 성과", "🏬 플랫폼별 매출"])
+tab1, tab2, tab3 = st.tabs(["📊 방문자 · 광고 성과", "🏬 플랫폼별 매출", "📅 기간별 매출 조회"])
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1064,6 +1064,267 @@ with tab2:
         </div>
         """, unsafe_allow_html=True)
 
+
+
+with tab3:
+    if df_platform_all.empty:
+        st.info("🏬 플랫폼 매출 데이터가 없어요. platform_to_sheets.py로 데이터를 먼저 업로드해 주세요.")
+    else:
+        st.markdown("### 📅 기간별 매출 조회")
+
+        # ── 날짜 범위 선택 ─────────────────────────────────────────
+        t3_min_date = df_platform_all["주문일_dt"].min().date()
+        t3_max_date = df_platform_all["주문일_dt"].max().date()
+        t3_today    = pd.Timestamp.now().date()
+
+        col_d1, col_d2, col_d3 = st.columns([2, 2, 4])
+        with col_d1:
+            t3_start = st.date_input(
+                "시작일",
+                value=t3_min_date,
+                min_value=t3_min_date,
+                max_value=t3_max_date,
+                key="t3_start",
+                format="YYYY-MM-DD",
+            )
+        with col_d2:
+            t3_end = st.date_input(
+                "종료일",
+                value=t3_max_date,
+                min_value=t3_min_date,
+                max_value=t3_max_date,
+                key="t3_end",
+                format="YYYY-MM-DD",
+            )
+        with col_d3:
+            st.markdown("<div style='padding-top:8px'></div>", unsafe_allow_html=True)
+            t3_q1, t3_q2, t3_q3, t3_q4, t3_q5 = st.columns(5)
+            def _set_range(days):
+                st.session_state["t3_start"] = max(t3_today - pd.Timedelta(days=days).to_pytimedelta().days.__class__(days), t3_min_date)
+                st.session_state["t3_end"]   = t3_today
+
+            import datetime as _dt
+            with t3_q1:
+                if st.button("오늘", key="t3_btn_today"):
+                    st.session_state["t3_start"] = t3_today
+                    st.session_state["t3_end"]   = t3_today
+                    st.rerun()
+            with t3_q2:
+                if st.button("최근 7일", key="t3_btn_7"):
+                    st.session_state["t3_start"] = max(t3_today - _dt.timedelta(days=6), t3_min_date)
+                    st.session_state["t3_end"]   = t3_today
+                    st.rerun()
+            with t3_q3:
+                if st.button("최근 30일", key="t3_btn_30"):
+                    st.session_state["t3_start"] = max(t3_today - _dt.timedelta(days=29), t3_min_date)
+                    st.session_state["t3_end"]   = t3_today
+                    st.rerun()
+            with t3_q4:
+                if st.button("이번 달", key="t3_btn_month"):
+                    st.session_state["t3_start"] = t3_today.replace(day=1)
+                    st.session_state["t3_end"]   = t3_today
+                    st.rerun()
+            with t3_q5:
+                if st.button("전체", key="t3_btn_all"):
+                    st.session_state["t3_start"] = t3_min_date
+                    st.session_state["t3_end"]   = t3_max_date
+                    st.rerun()
+
+        if t3_start > t3_end:
+            st.warning("⚠️ 시작일이 종료일보다 늦어요.")
+            st.stop()
+
+        # ── 데이터 필터 ───────────────────────────────────────────
+        t3_mask = (
+            (df_platform_all["주문일_dt"].dt.date >= t3_start) &
+            (df_platform_all["주문일_dt"].dt.date <= t3_end)
+        )
+        t3_df      = df_platform_all[t3_mask].copy()
+        t3_normal  = t3_df[~t3_df["주문상태"].str.contains("취소", na=False)]
+        t3_cancel  = t3_df[t3_df["주문상태"].str.contains("취소", na=False)]
+
+        days_range = (t3_end - t3_start).days + 1
+        st.markdown(
+            f'<div style="color:#8C8C8C;font-size:13px;margin-bottom:8px;">'
+            f'📌 {t3_start} ~ {t3_end} ({days_range}일) | '
+            f'정상 {len(t3_normal)}건 / 취소 {len(t3_cancel)}건</div>',
+            unsafe_allow_html=True
+        )
+        st.markdown("---")
+
+        # ── KPI 카드 ──────────────────────────────────────────────
+        t3_sales  = int(t3_normal["판매가"].sum())
+        t3_profit = int(t3_normal["실수익"].sum())
+        t3_orders = len(t3_normal)
+        t3_avg    = int(t3_sales / t3_orders) if t3_orders > 0 else 0
+        t3_prate  = round(t3_profit / t3_sales * 100, 1) if t3_sales > 0 else 0
+        t3_daily  = int(t3_sales / days_range) if days_range > 0 else 0
+
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        with c1: kpi_card("기간 총 매출", fmt_num(t3_sales, "원"))
+        with c2: kpi_card("기간 실수익", fmt_num(t3_profit, "원"), f"수익률 {t3_prate}%", t3_prate >= 65)
+        with c3: kpi_card("총 주문수", f"{t3_orders:,}건", f"취소 {len(t3_cancel)}건")
+        with c4: kpi_card("평균 객단가", f"{t3_avg:,}원")
+        with c5: kpi_card("일평균 매출", fmt_num(t3_daily, "원"), f"{days_range}일 기준")
+        with c6: kpi_card("수익률", f"{t3_prate}%",
+                          "목표 70% 미달" if t3_prate < 70 else "✓ 목표 달성",
+                          t3_prate >= 70)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── 플랫폼별 요약 테이블 ──────────────────────────────────
+        col_ta, col_tb = st.columns([3, 2])
+
+        with col_ta:
+            chart_container("플랫폼별 매출 요약", f"{t3_start} ~ {t3_end}")
+            if not t3_normal.empty:
+                t3_pf = t3_normal.groupby("플랫폼").agg(
+                    매출=("판매가", "sum"),
+                    실수익=("실수익", "sum"),
+                    주문수=("판매가", "count"),
+                ).reset_index().sort_values("매출", ascending=False)
+                t3_pf["수익률(%)"] = (t3_pf["실수익"] / t3_pf["매출"] * 100).round(1)
+                t3_pf["객단가"]    = (t3_pf["매출"] / t3_pf["주문수"]).astype(int)
+                t3_pf["매출"]      = t3_pf["매출"].apply(lambda x: f"{int(x):,}원")
+                t3_pf["실수익"]    = t3_pf["실수익"].apply(lambda x: f"{int(x):,}원")
+                t3_pf["객단가"]    = t3_pf["객단가"].apply(lambda x: f"{int(x):,}원")
+
+                # 수수료율 표시 (플랫폼마다 다름)
+                comm_map = {"Cafe24": "3% (PG)", "무신사": "30%", "29CM": "30%",
+                            "W컨셉": "30%", "SSF": "30%", "SI Village": "30%"}
+                t3_pf["수수료"] = t3_pf["플랫폼"].map(lambda x: comm_map.get(x, "30%"))
+
+                display_pf = t3_pf[["플랫폼", "매출", "실수익", "수익률(%)", "주문수", "객단가", "수수료"]].copy()
+                st.dataframe(display_pf, use_container_width=True, hide_index=True)
+            else:
+                st.info("해당 기간 데이터 없음")
+
+        with col_tb:
+            chart_container("플랫폼별 매출 비중", "")
+            if not t3_normal.empty:
+                t3_pie = t3_normal.groupby("플랫폼")["판매가"].sum().reset_index()
+                t3_pie = t3_pie[t3_pie["판매가"] > 0]
+                if not t3_pie.empty:
+                    fig_t3d = go.Figure(go.Pie(
+                        labels=t3_pie["플랫폼"],
+                        values=t3_pie["판매가"],
+                        hole=0.5,
+                        marker=dict(
+                            colors=[PLATFORM_COLORS.get(p, "#888") for p in t3_pie["플랫폼"]],
+                            line=dict(color="white", width=2)
+                        ),
+                        textinfo="label+percent",
+                        textfont=dict(size=12),
+                        hovertemplate="<b>%{label}</b><br>%{value:,}원 (%{percent})<extra></extra>",
+                    ))
+                    fig_t3d.update_layout(
+                        height=280, margin=dict(l=0, r=0, t=10, b=10),
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig_t3d, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── 일별 매출 트렌드 ──────────────────────────────────────
+        chart_container("일별 매출 추이", f"선택 기간 {days_range}일")
+        if not t3_normal.empty:
+            t3_daily_df = (
+                t3_normal.dropna(subset=["주문일_dt"])
+                .groupby(["주문일_dt", "플랫폼"])["판매가"]
+                .sum().reset_index()
+                .sort_values("주문일_dt")
+            )
+            if not t3_daily_df.empty:
+                fig_t3t = go.Figure()
+                for pname in t3_daily_df["플랫폼"].unique():
+                    sub = t3_daily_df[t3_daily_df["플랫폼"] == pname]
+                    _mode = "lines+markers" if len(sub) > 1 else "markers"
+                    fig_t3t.add_trace(go.Scatter(
+                        x=sub["주문일_dt"], y=sub["판매가"],
+                        name=pname, mode=_mode,
+                        line=dict(color=PLATFORM_COLORS.get(pname, "#888"), width=2.5),
+                        marker=dict(size=7, color=PLATFORM_COLORS.get(pname, "#888"),
+                                    line=dict(color="white", width=1.5)),
+                        hovertemplate=f"<b>%{{x|%Y-%m-%d}}</b><br>{pname}: %{{y:,}}원<extra></extra>",
+                    ))
+                fig_t3t.update_layout(
+                    height=300, margin=dict(l=0, r=0, t=10, b=0),
+                    plot_bgcolor="white", paper_bgcolor="white",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                    xaxis=dict(type="date", showgrid=False, tickformat="%m/%d",
+                               tickfont=dict(size=11)),
+                    yaxis=dict(showgrid=True, gridcolor="#F0F0F0",
+                               tickfont=dict(size=11), tickformat=","),
+                    hovermode="x unified",
+                )
+                st.plotly_chart(fig_t3t, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── 베스트셀러 TOP 10 ─────────────────────────────────────
+        chart_container("베스트셀러 TOP 10", f"{t3_start} ~ {t3_end} 기준")
+        if not t3_normal.empty:
+            t3_top = (
+                t3_normal.groupby("상품명")
+                .agg(매출=("판매가", "sum"), 수량=("수량", "sum"), 주문수=("판매가", "count"))
+                .reset_index().sort_values("매출", ascending=False).head(10)
+            )
+            t3_top_s = t3_top.sort_values("매출", ascending=True)
+            t3_top_s["상품명_s"] = t3_top_s["상품명"].apply(
+                lambda x: x[:24] + "…" if len(str(x)) > 24 else str(x)
+            )
+            fig_t3top = go.Figure(go.Bar(
+                x=t3_top_s["매출"], y=t3_top_s["상품명_s"],
+                orientation="h",
+                marker_color=COLOR["blue"], marker_line_width=0,
+                text=t3_top_s["매출"].apply(lambda v: fmt_num(v, "원")),
+                textposition="outside",
+                customdata=t3_top_s[["수량", "주문수"]].values,
+                hovertemplate="<b>%{y}</b><br>%{x:,}원 | 수량 %{customdata[0]}개 | %{customdata[1]}건<extra></extra>",
+            ))
+            fig_t3top.update_layout(
+                height=max(280, len(t3_top) * 38),
+                margin=dict(l=0, r=90, t=10, b=0),
+                plot_bgcolor="white", paper_bgcolor="white",
+                xaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickformat=","),
+                yaxis=dict(showgrid=False, tickfont=dict(size=12)),
+            )
+            st.plotly_chart(fig_t3top, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── 상세 주문 내역 ─────────────────────────────────────────
+        with st.expander("📋 상세 주문 내역"):
+            col_f1, col_f2 = st.columns([2, 4])
+            with col_f1:
+                t3_pf_filter = st.multiselect(
+                    "플랫폼 필터",
+                    options=sorted(t3_df["플랫폼"].unique().tolist()),
+                    default=sorted(t3_df["플랫폼"].unique().tolist()),
+                    key="t3_pf_filter",
+                )
+            with col_f2:
+                t3_status_filter = st.multiselect(
+                    "주문상태 필터",
+                    options=sorted(t3_df["주문상태"].unique().tolist()),
+                    default=[s for s in t3_df["주문상태"].unique() if "취소" not in str(s)],
+                    key="t3_status_filter",
+                )
+
+            t3_filtered = t3_df[
+                t3_df["플랫폼"].isin(t3_pf_filter) &
+                t3_df["주문상태"].isin(t3_status_filter)
+            ].copy()
+
+            detail_cols = [c for c in ["플랫폼", "주문일", "상품명", "컬러", "사이즈",
+                                        "수량", "판매가", "수수료율(%)", "실수익", "주문상태"]
+                           if c in t3_filtered.columns]
+            t3_display = t3_filtered[detail_cols].copy()
+            t3_display["판매가"] = t3_display["판매가"].apply(lambda x: f"{int(x):,}")
+            t3_display["실수익"] = t3_display["실수익"].apply(lambda x: f"{int(x):,}")
+            st.markdown(f"**{len(t3_display)}건** 조회됨")
+            st.dataframe(t3_display.sort_values("주문일", ascending=False),
+                         use_container_width=True, hide_index=True)
 
 # ── 푸터 ───────────────────────────────────────────────────────────
 st.markdown("---")
