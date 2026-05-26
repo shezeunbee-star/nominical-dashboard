@@ -18,7 +18,7 @@ COMMISSION     = 30
 API_VERSION    = "2026-03-01"
 
 # 무신사 market_id (연동 주문 확인 후 업데이트)
-MUSINSA_MARKET_IDS = {"MUSINSA"}  # 무신사 주문 들어오면 실제 ID로 업데이트
+MUSINSA_MARKET_IDS = {"musinsa"}  # 실제 market_id 확인됨 (소문자)
 
 def market_to_platform(market_id):
     if market_id in MUSINSA_MARKET_IDS:
