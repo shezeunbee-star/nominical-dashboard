@@ -14,14 +14,15 @@ from google.auth.transport.requests import Request
 import json, os
 
 # ── 설정 ───────────────────────────────────────────────────────────
-SPREADSHEET_ID = "1y9mZirj81sR2tkkGV_wTzFvJonPdJU-JuErSRDo_73E"
-SHEET_NAME     = "📅 일별 트래킹"
-SA_FILE        = "/Users/kimeunbee/Documents/지표분석/service_account.json"
-TOKEN_FILE     = "/Users/kimeunbee/Documents/지표분석/token.json"
+SPREADSHEET_ID      = "1y9mZirj81sR2tkkGV_wTzFvJonPdJU-JuErSRDo_73E"
+SHEET_NAME          = "📅 일별 트래킹"
+PLATFORM_SHEET_NAME = "🏬 플랫폼 매출"
+SA_FILE             = "/Users/kimeunbee/Documents/지표분析/service_account.json"
+TOKEN_FILE          = "/Users/kimeunbee/Documents/지표분析/token.json"
 
 COLOR = {
     "primary":    "#1A1A1A",
-    "accent":     "#E8FF4D",   # 브랜드 옐로
+    "accent":     "#E8FF4D",
     "blue":       "#4F8EF7",
     "green":      "#4ECBA0",
     "orange":     "#F7874F",
@@ -36,6 +37,13 @@ CHANNEL_COLORS = {
     "공식인스타": "#E1306C",
     "개인인스타": "#F56040",
     "직접방문":   "#1A1A1A",
+}
+
+PLATFORM_COLORS = {
+    "29CM":       "#1A1A1A",
+    "W컨셉":      "#7B4FBD",
+    "SSF":        "#E8420A",
+    "SI Village": "#C8A951",
 }
 
 st.set_page_config(
@@ -90,8 +98,17 @@ st.markdown("""
         border: 1px solid #EBEBEB;
         box-shadow: 0 1px 4px rgba(0,0,0,0.06);
     }
+    .kpi-card-sm {
+        background: #FFFFFF;
+        border-radius: 12px;
+        padding: 16px 16px;
+        border: 1px solid #EBEBEB;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
     .kpi-label { font-size: 12px; color: #8C8C8C; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; }
+    .kpi-label-sm { font-size: 11px; color: #8C8C8C; font-weight: 600; letter-spacing: 0.06em; margin-bottom: 4px; }
     .kpi-value { font-size: 28px; font-weight: 700; color: #1A1A1A; line-height: 1; }
+    .kpi-value-sm { font-size: 20px; font-weight: 700; color: #1A1A1A; line-height: 1; }
     .kpi-delta-pos { font-size: 13px; font-weight: 600; color: #4ECBA0; margin-top: 6px; }
     .kpi-delta-neg { font-size: 13px; font-weight: 600; color: #F7874F; margin-top: 6px; }
     .kpi-delta-neu { font-size: 13px; font-weight: 500; color: #8C8C8C; margin-top: 6px; }
@@ -99,18 +116,60 @@ st.markdown("""
     .section-sub   { font-size: 12px; color: #8C8C8C; margin-bottom: 16px; }
     div[data-testid="stMetric"] { display: none; }
     .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    .platform-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 700;
+        color: white;
+        margin-bottom: 6px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── 데이터 로드 ─────────────────────────────────────────────────────
+# ── 헬퍼 ───────────────────────────────────────────────────────────
+def fmt_num(n, suffix=""):
+    if n >= 10000:
+        return f"{n/10000:.1f}만{suffix}"
+    return f"{int(n):,}{suffix}"
+
+def kpi_card(label, value, delta_str="", delta_pos=None):
+    delta_class = "kpi-delta-pos" if delta_pos is True else ("kpi-delta-neg" if delta_pos is False else "kpi-delta-neu")
+    delta_html = f'<div class="{delta_class}">{delta_str}</div>' if delta_str else ""
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-label">{label}</div>
+        <div class="kpi-value">{value}</div>
+        {delta_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+def kpi_card_sm(label, value, badge_color="#1A1A1A", sub=""):
+    sub_html = f'<div style="font-size:11px;color:#8C8C8C;margin-top:4px;">{sub}</div>' if sub else ""
+    st.markdown(f"""
+    <div class="kpi-card-sm">
+        <div style="display:inline-block;padding:2px 8px;border-radius:20px;background:{badge_color};
+                    font-size:10px;font-weight:700;color:white;margin-bottom:6px;">{label}</div>
+        <div class="kpi-value-sm">{value}</div>
+        {sub_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+def chart_container(title, subtitle=""):
+    st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
+    if subtitle:
+        st.markdown(f'<div class="section-sub">{subtitle}</div>', unsafe_allow_html=True)
+
+
+# ── 데이터 로드: 방문자/광고 ────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_data():
     SCOPES = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
-    # 클라우드(Streamlit secrets) → 로컬 서비스 계정 → 로컬 OAuth 순으로 인증
     if "gcp_service_account" in st.secrets:
         creds = SACredentials.from_service_account_info(
             st.secrets["gcp_service_account"], scopes=SCOPES
@@ -140,25 +199,25 @@ def load_data():
     def safe_num(col, default=0):
         return pd.to_numeric(df[col], errors="coerce").fillna(default)
 
-    date_col   = df.iloc[:, 0].apply(lambda x: str(x).strip())
-    spend      = safe_num(headers[2])   # C
-    impressions= safe_num(headers[3])   # D
-    clicks     = safe_num(headers[4])   # E
-    ctr        = safe_num(headers[5])   # F
-    cpc        = safe_num(headers[6])   # G
-    conv_meta  = safe_num(headers[7])   # H
-    roas_meta  = safe_num(headers[8])   # I
-    visitors   = safe_num(headers[10])  # K
-    purchases  = safe_num(headers[11])  # L
-    bounce     = safe_num(headers[13])  # N
-    avg_price  = safe_num(headers[14])  # O
-    revenue    = safe_num(headers[15])  # P
-    ch_meta    = safe_num(headers[16])  # Q
-    ch_off     = safe_num(headers[17])  # R
-    ch_per     = safe_num(headers[18])  # S
-    ch_dir     = safe_num(headers[19])  # T
-    new_users  = safe_num(headers[20])  # U
-    ret_users  = safe_num(headers[21])  # V
+    date_col    = df.iloc[:, 0].apply(lambda x: str(x).strip())
+    spend       = safe_num(headers[2])
+    impressions = safe_num(headers[3])
+    clicks      = safe_num(headers[4])
+    ctr         = safe_num(headers[5])
+    cpc         = safe_num(headers[6])
+    conv_meta   = safe_num(headers[7])
+    roas_meta   = safe_num(headers[8])
+    visitors    = safe_num(headers[10])
+    purchases   = safe_num(headers[11])
+    bounce      = safe_num(headers[13])
+    avg_price   = safe_num(headers[14])
+    revenue     = safe_num(headers[15])
+    ch_meta     = safe_num(headers[16])
+    ch_off      = safe_num(headers[17])
+    ch_per      = safe_num(headers[18])
+    ch_dir      = safe_num(headers[19])
+    new_users   = safe_num(headers[20])
+    ret_users   = safe_num(headers[21])
 
     result = pd.DataFrame({
         "날짜":       date_col.values,
@@ -182,7 +241,6 @@ def load_data():
         "재방문":     ret_users.values,
     })
 
-    # CPO 계산
     result["CPO"] = result.apply(
         lambda r: round(r["광고비"] / r["구매"]) if r["구매"] > 0 and r["광고비"] > 0 else 0, axis=1
     )
@@ -193,48 +251,71 @@ def load_data():
         lambda r: round(r["매출"] / r["광고비"], 2) if r["광고비"] > 0 and r["매출"] > 0 else 0, axis=1
     )
 
-    # 날짜 파싱 (M/D → datetime)
     def parse_date(s):
         try:
             parts = str(s).strip().split("/")
             return pd.Timestamp(f"2026-{int(parts[0]):02d}-{int(parts[1]):02d}")
         except:
             return pd.NaT
+
     result["날짜_dt"] = result["날짜"].apply(parse_date)
     result["주차"] = result["날짜_dt"].apply(
         lambda d: f"{d.month}월 {((d.day - 1) // 7) + 1}주차" if pd.notna(d) else ""
     )
-
-    # 데이터 있는 날짜만
     result = result[result["방문자"] > 0].reset_index(drop=True)
     return result
 
 
-# ── 헬퍼 ───────────────────────────────────────────────────────────
-def fmt_num(n, suffix=""):
-    if n >= 10000:
-        return f"{n/10000:.1f}만{suffix}"
-    return f"{int(n):,}{suffix}"
+# ── 데이터 로드: 플랫폼 매출 ────────────────────────────────────────
+@st.cache_data(ttl=300)
+def load_platform_data():
+    SCOPES = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    if "gcp_service_account" in st.secrets:
+        creds = SACredentials.from_service_account_info(
+            st.secrets["gcp_service_account"], scopes=SCOPES
+        )
+    elif os.path.exists(SA_FILE):
+        creds = SACredentials.from_service_account_file(SA_FILE, scopes=SCOPES)
+    else:
+        creds = OAuthCredentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
 
-def kpi_card(label, value, delta_str="", delta_pos=None):
-    delta_class = "kpi-delta-pos" if delta_pos is True else ("kpi-delta-neg" if delta_pos is False else "kpi-delta-neu")
-    delta_html = f'<div class="{delta_class}">{delta_str}</div>' if delta_str else ""
-    st.markdown(f"""
-    <div class="kpi-card">
-        <div class="kpi-label">{label}</div>
-        <div class="kpi-value">{value}</div>
-        {delta_html}
-    </div>
-    """, unsafe_allow_html=True)
+    gc = gspread.authorize(creds)
+    ws = gc.open_by_key(SPREADSHEET_ID).worksheet(PLATFORM_SHEET_NAME)
+    raw = ws.get_all_values()
 
-def chart_container(title, subtitle=""):
-    st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
-    if subtitle:
-        st.markdown(f'<div class="section-sub">{subtitle}</div>', unsafe_allow_html=True)
+    if len(raw) <= 1:
+        return pd.DataFrame()
+
+    headers = raw[0]
+    rows = [dict(zip(headers, r + [""] * (len(headers) - len(r)))) for r in raw[1:] if r and r[0]]
+    df = pd.DataFrame(rows)
+
+    for col in ["수량", "판매가", "수수료율(%)", "실수익"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
+
+    if "주문일" in df.columns:
+        df["주문일_dt"] = pd.to_datetime(df["주문일"], errors="coerce")
+        df["주차"] = df["주문일_dt"].apply(
+            lambda d: f"{d.month}월 {((d.day - 1) // 7) + 1}주차" if pd.notna(d) else ""
+        )
+        df["주문월"] = df["주문일_dt"].apply(
+            lambda d: f"{d.month}월" if pd.notna(d) else ""
+        )
+
+    return df
 
 
-# ── 메인 ───────────────────────────────────────────────────────────
-df_all = load_data()
+# ══════════════════════════════════════════════════════════════════
+# 메인
+# ══════════════════════════════════════════════════════════════════
+df_all          = load_data()
+df_platform_all = load_platform_data()
 
 # 헤더
 col_logo, col_refresh = st.columns([6, 1])
@@ -247,415 +328,697 @@ with col_refresh:
 
 st.markdown("---")
 
-# ── 기간 필터 ────────────────────────────────────────────────────────
-weeks = ["전체 기간"] + sorted(df_all["주차"].unique().tolist(), key=lambda x: df_all[df_all["주차"]==x]["날짜_dt"].iloc[0])
+# ── 탭 분기 ──────────────────────────────────────────────────────
+tab1, tab2 = st.tabs(["📊 방문자 · 광고 성과", "🏬 플랫폼별 매출"])
 
-col_f1, col_f2, col_f3 = st.columns([2, 2, 4])
-with col_f1:
-    preset = st.selectbox("📅 조회 기간", ["전체 기간", "최근 7일", "최근 14일"] + [w for w in weeks if "주차" in w], label_visibility="collapsed")
-with col_f2:
+
+# ════════════════════════════════════════════════════════════════
+# TAB 1: 방문자 & 광고 성과 (기존 대시보드)
+# ════════════════════════════════════════════════════════════════
+with tab1:
+
+    # 기간 필터
+    weeks = ["전체 기간"] + sorted(df_all["주차"].unique().tolist(),
+                key=lambda x: df_all[df_all["주차"]==x]["날짜_dt"].iloc[0])
+    col_f1, col_f2, col_f3 = st.columns([2, 2, 4])
+    with col_f1:
+        preset = st.selectbox("📅 조회 기간",
+            ["전체 기간", "최근 7일", "최근 14일"] + [w for w in weeks if "주차" in w],
+            label_visibility="collapsed", key="tab1_preset")
+    with col_f2:
+        if preset == "전체 기간":
+            period_label = f"전체 {len(df_all)}일"
+        elif "주차" in preset:
+            period_label = f"📆 {preset}"
+        else:
+            n = int(preset.replace("최근 ", "").replace("일", ""))
+            period_label = f"최근 {n}일"
+        st.markdown(f'<div style="padding:8px 0;color:#8C8C8C;font-size:13px;">{period_label} 기준</div>',
+                    unsafe_allow_html=True)
+
     if preset == "전체 기간":
-        period_label = f"전체 {len(df_all)}일"
+        df = df_all.copy()
     elif "주차" in preset:
-        period_label = f"📆 {preset}"
+        df = df_all[df_all["주차"] == preset].copy()
     else:
         n = int(preset.replace("최근 ", "").replace("일", ""))
-        period_label = f"최근 {n}일"
-    st.markdown(f'<div style="padding:8px 0;color:#8C8C8C;font-size:13px;">{period_label} 기준</div>', unsafe_allow_html=True)
+        df = df_all.tail(n).copy()
+    df = df.reset_index(drop=True)
 
-# 필터 적용
-if preset == "전체 기간":
-    df = df_all.copy()
-elif "주차" in preset:
-    df = df_all[df_all["주차"] == preset].copy()
-else:
-    n = int(preset.replace("최근 ", "").replace("일", ""))
-    df = df_all.tail(n).copy()
+    st.markdown("---")
 
-df = df.reset_index(drop=True)
-st.markdown("---")
+    # KPI 카드
+    ad_days   = df[df["광고비"] > 0]
+    conv_days = df[df["구매"] > 0]
 
-# ── KPI 카드 행 ─────────────────────────────────────────────────────
-ad_days = df[df["광고비"] > 0]
-conv_days = df[df["구매"] > 0]
+    total_visitors  = int(df["방문자"].sum())
+    total_purchases = int(df["구매"].sum())
+    total_spend     = int(df["광고비"].sum())
+    total_revenue   = int(df["매출"].sum())
+    avg_cpo         = int(total_spend / total_purchases) if total_purchases > 0 else 0
+    overall_roas    = round(total_revenue / total_spend, 1) if total_spend > 0 else 0
+    overall_cvr     = round(total_purchases / total_visitors * 100, 2) if total_visitors > 0 else 0
+    new_sum         = df["신규"].sum()
+    ret_sum         = df["재방문"].sum()
+    avg_new_rate    = int(new_sum / (new_sum + ret_sum) * 100) if (new_sum + ret_sum) > 0 else 0
 
-total_visitors = int(df["방문자"].sum())
-total_purchases = int(df["구매"].sum())
-total_spend = int(df["광고비"].sum())
-total_revenue = int(df["매출"].sum())
-avg_cpo = int(total_spend / total_purchases) if total_purchases > 0 else 0
-overall_roas = round(total_revenue / total_spend, 1) if total_spend > 0 else 0
-overall_cvr = round(total_purchases / total_visitors * 100, 2) if total_visitors > 0 else 0
-avg_new_rate = int(df["신규"].sum() / (df["신규"].sum() + df["재방문"].sum()) * 100) if (df["신규"].sum() + df["재방문"].sum()) > 0 else 0
+    recent = df.tail(7)
+    prior  = df.iloc[max(0, len(df)-14):len(df)-7]
+    vis_delta = ""
+    vis_pos = None
+    if len(prior) > 0 and prior["방문자"].sum() > 0:
+        pct = round((recent["방문자"].sum() - prior["방문자"].sum()) / prior["방문자"].sum() * 100)
+        vis_delta = f"{'▲' if pct >= 0 else '▼'} {abs(pct)}% vs 이전 7일"
+        vis_pos = pct >= 0
 
-# 최근 7일 vs 이전 기간 비교
-recent = df.tail(7)
-prior  = df.iloc[max(0, len(df)-14):len(df)-7]
-vis_delta = ""
-vis_pos = None
-if len(prior) > 0 and prior["방문자"].sum() > 0:
-    pct = round((recent["방문자"].sum() - prior["방문자"].sum()) / prior["방문자"].sum() * 100)
-    vis_delta = f"{'▲' if pct >= 0 else '▼'} {abs(pct)}% vs 이전 7일"
-    vis_pos = pct >= 0
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    with c1: kpi_card("총 방문자", fmt_num(total_visitors, "명"), vis_delta, vis_pos)
+    with c2: kpi_card("총 전환", f"{total_purchases}건", f"전환율 {overall_cvr}%")
+    with c3: kpi_card("누적 광고비", fmt_num(total_spend, "원"))
+    with c4: kpi_card("누적 매출", fmt_num(total_revenue, "원"), f"ROAS {overall_roas}배", overall_roas >= 3)
+    with c5: kpi_card("평균 CPO", f"{avg_cpo:,}원" if avg_cpo else "—", f"전환일 {len(conv_days)}일")
+    with c6: kpi_card("신규방문 비율", f"{avg_new_rate}%", f"재방문 {100-avg_new_rate}%")
 
-c1, c2, c3, c4, c5, c6 = st.columns(6)
-with c1: kpi_card("총 방문자", fmt_num(total_visitors, "명"), vis_delta, vis_pos)
-with c2: kpi_card("총 전환", f"{total_purchases}건", f"전환율 {overall_cvr}%")
-with c3: kpi_card("누적 광고비", fmt_num(total_spend, "원"))
-with c4: kpi_card("누적 매출", fmt_num(total_revenue, "원"), f"ROAS {overall_roas}배", overall_roas >= 3)
-with c5: kpi_card("평균 CPO", f"{avg_cpo:,}원" if avg_cpo else "—", f"전환일 {len(conv_days)}일")
-with c6: kpi_card("신규방문 비율", f"{avg_new_rate}%", f"재방문 {100-avg_new_rate}%")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-st.markdown("<br>", unsafe_allow_html=True)
+    # 차트 1: 일별 방문자 & 전환 추이
+    chart_container("일별 방문자 · 전환 추이", "바이럴 스파이크, 광고 집행일, 전환 발생 패턴을 한눈에")
 
-# ── 차트 1: 일별 방문자 & 전환 추이 ────────────────────────────────
-chart_container("일별 방문자 · 전환 추이", "바이럴 스파이크, 광고 집행일, 전환 발생 패턴을 한눈에")
-
-fig1 = make_subplots(specs=[[{"secondary_y": True}]])
-
-# 방문자 영역 차트
-fig1.add_trace(go.Scatter(
-    x=df["날짜"], y=df["방문자"],
-    name="방문자",
-    fill="tozeroy",
-    fillcolor="rgba(79,142,247,0.12)",
-    line=dict(color=COLOR["blue"], width=2),
-    hovertemplate="<b>%{x}</b><br>방문자: %{y:,}명<extra></extra>",
-), secondary_y=False)
-
-# 광고비 막대
-fig1.add_trace(go.Bar(
-    x=df["날짜"], y=df["광고비"],
-    name="광고비",
-    marker_color="rgba(232,255,77,0.7)",
-    marker_line_color=COLOR["accent"],
-    marker_line_width=1,
-    hovertemplate="<b>%{x}</b><br>광고비: %{y:,}원<extra></extra>",
-    yaxis="y3",
-), secondary_y=False)
-
-# 전환 점 (전환 있는 날만 크게)
-conv_df = df[df["구매"] > 0]
-fig1.add_trace(go.Scatter(
-    x=conv_df["날짜"], y=conv_df["방문자"],
-    name="전환 발생",
-    mode="markers",
-    marker=dict(symbol="circle", size=12, color=COLOR["green"],
-                line=dict(color="white", width=2)),
-    hovertemplate="<b>%{x}</b><br>전환 %{customdata}건<extra></extra>",
-    customdata=conv_df["구매"].astype(int),
-), secondary_y=False)
-
-fig1.update_layout(
-    height=320,
-    margin=dict(l=0, r=0, t=10, b=0),
-    plot_bgcolor="white",
-    paper_bgcolor="white",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-    xaxis=dict(showgrid=False, tickfont=dict(size=11)),
-    yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="방문자수"),
-    hovermode="x unified",
-    barmode="overlay",
-)
-# 광고비 y축을 오른쪽에 보이지 않게 (스케일 조정용)
-fig1.update_layout(yaxis2=dict(overlaying="y", visible=False))
-
-st.plotly_chart(fig1, use_container_width=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# ── 차트 2+3: 광고 효율 & 채널 유입 ────────────────────────────────
-col_left, col_right = st.columns([3, 2])
-
-with col_left:
-    chart_container("광고 효율 추이", "CPO는 낮을수록, ROAS는 높을수록 좋음")
-
-    ad_df = df[df["광고비"] > 0].copy()
-    if not ad_df.empty:
-        fig2 = make_subplots(specs=[[{"secondary_y": True}]])
-
-        fig2.add_trace(go.Bar(
-            x=ad_df["날짜"], y=ad_df["CPO"],
-            name="CPO (원)",
-            marker_color=COLOR["orange"],
-            opacity=0.8,
-            hovertemplate="<b>%{x}</b><br>CPO: %{y:,}원<extra></extra>",
-        ), secondary_y=False)
-
-        roas_df = ad_df[ad_df["ROAS"] > 0]
-        if not roas_df.empty:
-            fig2.add_trace(go.Scatter(
-                x=roas_df["날짜"], y=roas_df["ROAS"],
-                name="ROAS (배)",
-                mode="lines+markers",
-                line=dict(color=COLOR["green"], width=2.5),
-                marker=dict(size=7, color=COLOR["green"]),
-                hovertemplate="<b>%{x}</b><br>ROAS: %{y:.1f}배<extra></extra>",
-            ), secondary_y=True)
-
-        # CPO 평균선
-        if avg_cpo > 0:
-            fig2.add_hline(y=avg_cpo, line_dash="dot", line_color=COLOR["gray"],
-                           annotation_text=f"평균 CPO {avg_cpo:,}원", annotation_position="top left",
-                           secondary_y=False)
-
-        fig2.update_layout(
-            height=300,
-            margin=dict(l=0, r=0, t=10, b=0),
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            xaxis=dict(showgrid=False, tickfont=dict(size=11)),
-            yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="CPO (원)"),
-            yaxis2=dict(showgrid=False, tickfont=dict(size=11), title="ROAS (배)"),
-            hovermode="x unified",
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-    else:
-        st.info("광고 집행 데이터 없음")
-
-with col_right:
-    chart_container("채널별 누적 유입", "어디서 온 사람들이 가장 많은지")
-
-    ch_totals = {
-        "메타광고":   int(df["유입_메타"].sum()),
-        "공식인스타": int(df["유입_공식"].sum()),
-        "개인인스타": int(df["유입_개인"].sum()),
-        "직접방문":   int(df["유입_직접"].sum()),
-    }
-    ch_totals = {k: v for k, v in ch_totals.items() if v > 0}
-
-    if ch_totals:
-        fig3 = go.Figure(go.Pie(
-            labels=list(ch_totals.keys()),
-            values=list(ch_totals.values()),
-            hole=0.52,
-            marker=dict(colors=[CHANNEL_COLORS[k] for k in ch_totals.keys()],
-                        line=dict(color="white", width=2)),
-            textinfo="label+percent",
-            textfont=dict(size=12),
-            hovertemplate="<b>%{label}</b><br>%{value:,}명 (%{percent})<extra></extra>",
-        ))
-        fig3.update_layout(
-            height=300,
-            margin=dict(l=0, r=0, t=10, b=10),
-            showlegend=False,
-            annotations=[dict(text=f"총<br>{fmt_num(sum(ch_totals.values()))}명",
-                              x=0.5, y=0.5, font_size=14, font_color="#1A1A1A",
-                              showarrow=False)]
-        )
-        st.plotly_chart(fig3, use_container_width=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# ── 차트 4: 신규 vs 재방문자 & 픽셀 모수 누적 ──────────────────────
-chart_container("신규 vs 재방문자 · 픽셀 모수 누적", "신규 유입이 리타게팅 모수로 쌓이는 흐름")
-
-nvr_df = df[(df["신규"] > 0) | (df["재방문"] > 0)].copy()
-if not nvr_df.empty:
-    nvr_df["누적_신규"] = nvr_df["신규"].cumsum()
-
-    fig4 = make_subplots(specs=[[{"secondary_y": True}]])
-
-    fig4.add_trace(go.Bar(
-        x=nvr_df["날짜"], y=nvr_df["신규"],
-        name="신규방문자",
-        marker_color=COLOR["blue"],
-        opacity=0.85,
-        hovertemplate="<b>%{x}</b><br>신규: %{y:,}명<extra></extra>",
+    fig1 = make_subplots(specs=[[{"secondary_y": True}]])
+    fig1.add_trace(go.Scatter(
+        x=df["날짜"], y=df["방문자"],
+        name="방문자",
+        fill="tozeroy",
+        fillcolor="rgba(79,142,247,0.12)",
+        line=dict(color=COLOR["blue"], width=2),
+        hovertemplate="<b>%{x}</b><br>방문자: %{y:,}명<extra></extra>",
     ), secondary_y=False)
-
-    fig4.add_trace(go.Bar(
-        x=nvr_df["날짜"], y=nvr_df["재방문"],
-        name="재방문자",
-        marker_color=COLOR["green"],
-        opacity=0.85,
-        hovertemplate="<b>%{x}</b><br>재방문: %{y:,}명<extra></extra>",
+    fig1.add_trace(go.Bar(
+        x=df["날짜"], y=df["광고비"],
+        name="광고비",
+        marker_color="rgba(232,255,77,0.7)",
+        marker_line_color=COLOR["accent"],
+        marker_line_width=1,
+        hovertemplate="<b>%{x}</b><br>광고비: %{y:,}원<extra></extra>",
+        yaxis="y3",
     ), secondary_y=False)
-
-    # 누적 픽셀 모수 라인
-    fig4.add_trace(go.Scatter(
-        x=nvr_df["날짜"], y=nvr_df["누적_신규"],
-        name="누적 픽셀 모수",
-        mode="lines",
-        line=dict(color=COLOR["orange"], width=2, dash="dot"),
-        hovertemplate="<b>%{x}</b><br>누적 픽셀 모수: %{y:,}명<extra></extra>",
-    ), secondary_y=True)
-
-    # 전환 발생 날 마킹
-    for _, row in nvr_df[nvr_df["구매"] > 0].iterrows():
-        fig4.add_vline(
-            x=row["날짜"], line_width=1, line_dash="dot",
-            line_color=COLOR["green"], opacity=0.4
-        )
-
-    fig4.update_layout(
-        height=300,
-        margin=dict(l=0, r=0, t=10, b=0),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        barmode="stack",
+    conv_df = df[df["구매"] > 0]
+    fig1.add_trace(go.Scatter(
+        x=conv_df["날짜"], y=conv_df["방문자"],
+        name="전환 발생",
+        mode="markers",
+        marker=dict(symbol="circle", size=12, color=COLOR["green"],
+                    line=dict(color="white", width=2)),
+        hovertemplate="<b>%{x}</b><br>전환 %{customdata}건<extra></extra>",
+        customdata=conv_df["구매"].astype(int),
+    ), secondary_y=False)
+    fig1.update_layout(
+        height=320, margin=dict(l=0, r=0, t=10, b=0),
+        plot_bgcolor="white", paper_bgcolor="white",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         xaxis=dict(showgrid=False, tickfont=dict(size=11)),
         yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="방문자수"),
-        yaxis2=dict(showgrid=False, tickfont=dict(size=11), title="누적 모수"),
-        hovermode="x unified",
+        hovermode="x unified", barmode="overlay",
     )
-    st.plotly_chart(fig4, use_container_width=True)
+    fig1.update_layout(yaxis2=dict(overlaying="y", visible=False))
+    st.plotly_chart(fig1, use_container_width=True)
 
-    # 인사이트 배너
-    pixel_total = int(nvr_df["신규"].sum())
-    latest_ret = nvr_df["재방문"].iloc[-3:].mean()
-    early_ret  = nvr_df["재방문"].iloc[:max(1, len(nvr_df)-7)].mean()
-    ret_trend  = "📈 재방문자 증가 추세 — 브랜드 인지도 쌓이는 중" if latest_ret > early_ret * 1.2 else ""
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <div style="background:#F0F9FF;border-left:4px solid {COLOR['blue']};padding:14px 18px;border-radius:8px;font-size:13px;color:#1A1A1A;">
-    📌 <b>누적 픽셀 모수 {pixel_total:,}명</b> — 리타게팅 캠페인이 이 모수 전체를 커버하도록 설정됐는지 확인.
-    신규 방문자는 방문 후 3~7일 내 리타게팅 시 전환율이 cold 대비 3~5배 높음.
-    {"&nbsp;&nbsp;|&nbsp;&nbsp;" + ret_trend if ret_trend else ""}
-    </div>
-    """, unsafe_allow_html=True)
+    # 차트 2+3: 광고 효율 & 채널 유입
+    col_left, col_right = st.columns([3, 2])
 
-st.markdown("<br>", unsafe_allow_html=True)
+    with col_left:
+        chart_container("광고 효율 추이", "CPO는 낮을수록, ROAS는 높을수록 좋음")
+        ad_df = df[df["광고비"] > 0].copy()
+        if not ad_df.empty:
+            fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+            fig2.add_trace(go.Bar(
+                x=ad_df["날짜"], y=ad_df["CPO"],
+                name="CPO (원)",
+                marker_color=COLOR["orange"],
+                opacity=0.8,
+                hovertemplate="<b>%{x}</b><br>CPO: %{y:,}원<extra></extra>",
+            ), secondary_y=False)
+            roas_df = ad_df[ad_df["ROAS"] > 0]
+            if not roas_df.empty:
+                fig2.add_trace(go.Scatter(
+                    x=roas_df["날짜"], y=roas_df["ROAS"],
+                    name="ROAS (배)",
+                    mode="lines+markers",
+                    line=dict(color=COLOR["green"], width=2.5),
+                    marker=dict(size=7, color=COLOR["green"]),
+                    hovertemplate="<b>%{x}</b><br>ROAS: %{y:.1f}배<extra></extra>",
+                ), secondary_y=True)
+            if avg_cpo > 0:
+                fig2.add_hline(y=avg_cpo, line_dash="dot", line_color=COLOR["gray"],
+                               annotation_text=f"평균 CPO {avg_cpo:,}원",
+                               annotation_position="top left", secondary_y=False)
+            fig2.update_layout(
+                height=300, margin=dict(l=0, r=0, t=10, b=0),
+                plot_bgcolor="white", paper_bgcolor="white",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="CPO (원)"),
+                yaxis2=dict(showgrid=False, tickfont=dict(size=11), title="ROAS (배)"),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.info("광고 집행 데이터 없음")
 
-# ── 차트 5: 일별 채널 유입 스택 바 ─────────────────────────────────
-with st.expander("📊 일별 채널 유입 상세 보기"):
-    chart_container("일별 채널별 유입 구성", "어떤 날 어떤 채널이 트래픽을 이끌었는지")
-
-    ch_df = df[(df["유입_메타"] + df["유입_공식"] + df["유입_개인"] + df["유입_직접"]) > 0]
-    if not ch_df.empty:
-        fig5 = go.Figure()
-        for ch, col_key, color in [
-            ("메타광고",   "유입_메타",  "#1877F2"),
-            ("공식인스타", "유입_공식",  "#E1306C"),
-            ("개인인스타", "유입_개인",  "#F56040"),
-            ("직접방문",   "유입_직접",  "#1A1A1A"),
-        ]:
-            fig5.add_trace(go.Bar(
-                x=ch_df["날짜"], y=ch_df[col_key],
-                name=ch, marker_color=color,
-                hovertemplate=f"<b>%{{x}}</b><br>{ch}: %{{y}}명<extra></extra>"
+    with col_right:
+        chart_container("채널별 누적 유입", "어디서 온 사람들이 가장 많은지")
+        ch_totals = {
+            "메타광고":   int(df["유입_메타"].sum()),
+            "공식인스타": int(df["유입_공식"].sum()),
+            "개인인스타": int(df["유입_개인"].sum()),
+            "직접방문":   int(df["유입_직접"].sum()),
+        }
+        ch_totals = {k: v for k, v in ch_totals.items() if v > 0}
+        if ch_totals:
+            fig3 = go.Figure(go.Pie(
+                labels=list(ch_totals.keys()),
+                values=list(ch_totals.values()),
+                hole=0.52,
+                marker=dict(colors=[CHANNEL_COLORS[k] for k in ch_totals.keys()],
+                            line=dict(color="white", width=2)),
+                textinfo="label+percent",
+                textfont=dict(size=12),
+                hovertemplate="<b>%{label}</b><br>%{value:,}명 (%{percent})<extra></extra>",
             ))
-        fig5.update_layout(
-            height=260, barmode="stack",
-            margin=dict(l=0, r=0, t=10, b=0),
-            plot_bgcolor="white", paper_bgcolor="white",
+            fig3.update_layout(
+                height=300, margin=dict(l=0, r=0, t=10, b=10),
+                showlegend=False,
+                annotations=[dict(text=f"총<br>{fmt_num(sum(ch_totals.values()))}명",
+                                  x=0.5, y=0.5, font_size=14, font_color="#1A1A1A",
+                                  showarrow=False)]
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 차트 4: 신규 vs 재방문자
+    chart_container("신규 vs 재방문자 · 픽셀 모수 누적", "신규 유입이 리타게팅 모수로 쌓이는 흐름")
+    nvr_df = df[(df["신규"] > 0) | (df["재방문"] > 0)].copy()
+    if not nvr_df.empty:
+        nvr_df["누적_신규"] = nvr_df["신규"].cumsum()
+        fig4 = make_subplots(specs=[[{"secondary_y": True}]])
+        fig4.add_trace(go.Bar(x=nvr_df["날짜"], y=nvr_df["신규"], name="신규방문자",
+            marker_color=COLOR["blue"], opacity=0.85,
+            hovertemplate="<b>%{x}</b><br>신규: %{y:,}명<extra></extra>",
+        ), secondary_y=False)
+        fig4.add_trace(go.Bar(x=nvr_df["날짜"], y=nvr_df["재방문"], name="재방문자",
+            marker_color=COLOR["green"], opacity=0.85,
+            hovertemplate="<b>%{x}</b><br>재방문: %{y:,}명<extra></extra>",
+        ), secondary_y=False)
+        fig4.add_trace(go.Scatter(x=nvr_df["날짜"], y=nvr_df["누적_신규"],
+            name="누적 픽셀 모수", mode="lines",
+            line=dict(color=COLOR["orange"], width=2, dash="dot"),
+            hovertemplate="<b>%{x}</b><br>누적 픽셀 모수: %{y:,}명<extra></extra>",
+        ), secondary_y=True)
+        for _, row in nvr_df[nvr_df["구매"] > 0].iterrows():
+            fig4.add_vline(x=row["날짜"], line_width=1, line_dash="dot",
+                           line_color=COLOR["green"], opacity=0.4)
+        fig4.update_layout(
+            height=300, margin=dict(l=0, r=0, t=10, b=0),
+            plot_bgcolor="white", paper_bgcolor="white", barmode="stack",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
             xaxis=dict(showgrid=False, tickfont=dict(size=11)),
-            yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11)),
+            yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="방문자수"),
+            yaxis2=dict(showgrid=False, tickfont=dict(size=11), title="누적 모수"),
             hovermode="x unified",
         )
-        st.plotly_chart(fig5, use_container_width=True)
+        st.plotly_chart(fig4, use_container_width=True)
 
-# ── 기간 인사이트 분석 ──────────────────────────────────────────────
-st.markdown("<br>", unsafe_allow_html=True)
-st.markdown("---")
-chart_container("🔍 기간 종합 인사이트", f"{df['날짜'].iloc[0]} ~ {df['날짜'].iloc[-1]} | {len(df)}일 분석")
+        pixel_total = int(nvr_df["신규"].sum())
+        latest_ret  = nvr_df["재방문"].iloc[-3:].mean()
+        early_ret   = nvr_df["재방문"].iloc[:max(1, len(nvr_df)-7)].mean()
+        ret_trend   = "📈 재방문자 증가 추세 — 브랜드 인지도 쌓이는 중" if latest_ret > early_ret * 1.2 else ""
+        st.markdown(f"""
+        <div style="background:#F0F9FF;border-left:4px solid {COLOR['blue']};padding:14px 18px;border-radius:8px;font-size:13px;color:#1A1A1A;">
+        📌 <b>누적 픽셀 모수 {pixel_total:,}명</b> — 리타게팅 캠페인이 이 모수 전체를 커버하도록 설정됐는지 확인.
+        신규 방문자는 방문 후 3~7일 내 리타게팅 시 전환율이 cold 대비 3~5배 높음.
+        {"&nbsp;&nbsp;|&nbsp;&nbsp;" + ret_trend if ret_trend else ""}
+        </div>
+        """, unsafe_allow_html=True)
 
-def generate_period_insight(df):
-    insights = []
-    if df.empty or df["방문자"].sum() == 0:
-        return ["데이터가 없어요."]
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    total_vis   = int(df["방문자"].sum())
-    total_conv  = int(df["구매"].sum())
-    total_spend = int(df["광고비"].sum())
-    total_rev   = int(df["매출"].sum())
-    total_new   = int(df["신규"].sum())
-    total_ret   = int(df["재방문"].sum())
-    ad_days_cnt = int((df["광고비"] > 0).sum())
-    conv_days   = df[df["구매"] > 0]
-    ad_df       = df[df["광고비"] > 0]
+    # 차트 5: 채널 유입 스택 바 (접기)
+    with st.expander("📊 일별 채널 유입 상세 보기"):
+        chart_container("일별 채널별 유입 구성", "어떤 날 어떤 채널이 트래픽을 이끌었는지")
+        ch_df = df[(df["유입_메타"] + df["유입_공식"] + df["유입_개인"] + df["유입_직접"]) > 0]
+        if not ch_df.empty:
+            fig5 = go.Figure()
+            for ch, col_key, color in [
+                ("메타광고",   "유입_메타",  "#1877F2"),
+                ("공식인스타", "유입_공식",  "#E1306C"),
+                ("개인인스타", "유입_개인",  "#F56040"),
+                ("직접방문",   "유입_직접",  "#1A1A1A"),
+            ]:
+                fig5.add_trace(go.Bar(x=ch_df["날짜"], y=ch_df[col_key],
+                    name=ch, marker_color=color,
+                    hovertemplate=f"<b>%{{x}}</b><br>{ch}: %{{y}}명<extra></extra>"))
+            fig5.update_layout(
+                height=260, barmode="stack",
+                margin=dict(l=0, r=0, t=10, b=0),
+                plot_bgcolor="white", paper_bgcolor="white",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11)),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig5, use_container_width=True)
 
-    # ① 전체 성과 요약
-    cvr = round(total_conv / total_vis * 100, 2) if total_vis > 0 else 0
-    roas = round(total_rev / total_spend, 1) if total_spend > 0 else 0
-    cpo  = round(total_spend / total_conv) if total_conv > 0 else 0
-    insights.append(
-        f"**📊 기간 성과 요약**\n"
-        f"방문자 {total_vis:,}명에서 {total_conv}건 전환 (전환율 {cvr}%). "
-        f"{'광고비 ' + str(f'{total_spend:,}원') + ' 투입, ROAS ' + str(roas) + '배 달성.' if total_spend > 0 else '광고 미집행 기간.'}"
-    )
+    # 기간 인사이트
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("---")
+    chart_container("🔍 기간 종합 인사이트",
+                    f"{df['날짜'].iloc[0]} ~ {df['날짜'].iloc[-1]} | {len(df)}일 분석")
 
-    # ② 트래픽 스파이크 분석
-    if len(df) > 1:
-        max_day = df.loc[df["방문자"].idxmax()]
-        avg_vis = df["방문자"].mean()
-        if max_day["방문자"] > avg_vis * 2.5:
-            top_ch = max({"메타광고": max_day["유입_메타"], "공식인스타": max_day["유입_공식"],
-                          "개인인스타": max_day["유입_개인"], "직접방문": max_day["유입_직접"]}, key=lambda k: {"메타광고": max_day["유입_메타"], "공식인스타": max_day["유입_공식"], "개인인스타": max_day["유입_개인"], "직접방문": max_day["유입_직접"]}[k])
-            new_pct = round(max_day["신규"] / max_day["방문자"] * 100) if max_day["방문자"] > 0 else 0
+    def generate_period_insight(df):
+        insights = []
+        if df.empty or df["방문자"].sum() == 0:
+            return ["데이터가 없어요."]
+
+        total_vis   = int(df["방문자"].sum())
+        total_conv  = int(df["구매"].sum())
+        total_spend = int(df["광고비"].sum())
+        total_rev   = int(df["매출"].sum())
+        total_new   = int(df["신규"].sum())
+        total_ret   = int(df["재방문"].sum())
+        conv_days   = df[df["구매"] > 0]
+        ad_df       = df[df["광고비"] > 0]
+
+        cvr  = round(total_conv / total_vis * 100, 2) if total_vis > 0 else 0
+        roas = round(total_rev / total_spend, 1) if total_spend > 0 else 0
+        cpo  = round(total_spend / total_conv) if total_conv > 0 else 0
+        insights.append(
+            f"**📊 기간 성과 요약**\n"
+            f"방문자 {total_vis:,}명에서 {total_conv}건 전환 (전환율 {cvr}%). "
+            f"{'광고비 ' + str(f'{total_spend:,}원') + ' 투입, ROAS ' + str(roas) + '배 달성.' if total_spend > 0 else '광고 미집행 기간.'}"
+        )
+
+        if len(df) > 1:
+            max_day = df.loc[df["방문자"].idxmax()]
+            avg_vis = df["방문자"].mean()
+            if max_day["방문자"] > avg_vis * 2.5:
+                top_ch = max({"메타광고": max_day["유입_메타"], "공식인스타": max_day["유입_공식"],
+                              "개인인스타": max_day["유입_개인"], "직접방문": max_day["유입_직접"]},
+                             key=lambda k: {"메타광고": max_day["유입_메타"], "공식인스타": max_day["유입_공식"],
+                                            "개인인스타": max_day["유입_개인"], "직접방문": max_day["유입_직접"]}[k])
+                new_pct = round(max_day["신규"] / max_day["방문자"] * 100) if max_day["방문자"] > 0 else 0
+                insights.append(
+                    f"**📈 최대 트래픽 스파이크: {max_day['날짜']}**\n"
+                    f"평균({int(avg_vis):,}명) 대비 {round(max_day['방문자']/avg_vis, 1)}배 급등. "
+                    f"주요 유입: {top_ch}. 신규 비중 {new_pct}% — "
+                    f"{'바이럴/콘텐츠 확산으로 신규 유입이 대부분. cold audience라 당일 전환은 낮지만 픽셀 모수 대거 확충.' if new_pct >= 80 else '기존 팔로워 + 신규 혼합 유입. 전환 가능성 상대적으로 높은 날.'}"
+                )
+
+        if total_conv > 0 and not conv_days.empty:
+            best_conv    = conv_days.loc[conv_days["구매"].idxmax()]
+            ret_on_conv  = conv_days["재방문"].mean()
+            ret_overall  = df["재방문"].mean()
             insights.append(
-                f"**📈 최대 트래픽 스파이크: {max_day['날짜']}**\n"
-                f"평균({int(avg_vis):,}명) 대비 {round(max_day['방문자']/avg_vis, 1)}배 급등. "
-                f"주요 유입: {top_ch}. 신규 비중 {new_pct}% — "
-                f"{'바이럴/콘텐츠 확산으로 신규 유입이 대부분. cold audience라 당일 전환은 낮지만 픽셀 모수 대거 확충.' if new_pct >= 80 else '기존 팔로워 + 신규 혼합 유입. 전환 가능성 상대적으로 높은 날.'}"
+                f"**🛍 전환 패턴**\n"
+                f"총 {total_conv}건 전환, {len(conv_days)}일에 분산 발생. "
+                f"최다 전환일: {best_conv['날짜']} ({int(best_conv['구매'])}건). "
+                + (f"전환 발생일의 재방문자 평균({ret_on_conv:.0f}명)이 전체 평균({ret_overall:.0f}명)보다 높음 → "
+                   f"한 번 본 후 재방문해서 결제하는 패턴 확인. 리타게팅 효과 작동 중."
+                   if ret_on_conv > ret_overall * 1.1 else
+                   f"신규 방문자가 전환까지 바로 이어지는 케이스도 포함 — 콘텐츠/프로모션 직접 구매 설득력 있음.")
+            )
+        elif total_conv == 0 and total_spend > 0:
+            avg_bounce = df["이탈율"].mean()
+            insights.append(
+                f"**⚠️ 전환 0건 구간**\n"
+                f"광고비 {total_spend:,}원 집행했으나 전환 없음. "
+                f"평균 이탈율 {avg_bounce:.0f}% — "
+                + (f"이탈율이 높아 랜딩 직후 이탈이 주요 원인. 소재와 상품페이지 메시지 일관성 점검 필요."
+                   if avg_bounce >= 60
+                   else f"이탈율은 양호하나 결제 미전환 — 가격 저항, 배송비, 리뷰 부족 등 결제 직전 장벽 점검 필요.")
             )
 
-    # ③ 전환 패턴 분석
-    if total_conv > 0 and not conv_days.empty:
-        best_conv = conv_days.loc[conv_days["구매"].idxmax()]
-        ret_on_conv = conv_days["재방문"].mean()
-        ret_overall = df["재방문"].mean()
+        ch_totals = {
+            "메타광고":   int(df["유입_메타"].sum()),
+            "공식인스타": int(df["유입_공식"].sum()),
+            "개인인스타": int(df["유입_개인"].sum()),
+            "직접방문":   int(df["유입_직접"].sum()),
+        }
+        top_ch    = max(ch_totals, key=ch_totals.get)
+        ch_str    = " | ".join([f"{k} {v:,}명" for k, v in sorted(ch_totals.items(), key=lambda x: -x[1]) if v > 0])
+        direct_ok = "직접방문이 꾸준히 유입되는 것은 브랜드 인지도가 쌓이고 있는 긍정 신호." if ch_totals["직접방문"] >= 50 else ""
         insights.append(
-            f"**🛍 전환 패턴**\n"
-            f"총 {total_conv}건 전환, {len(conv_days)}일에 분산 발생. "
-            f"최다 전환일: {best_conv['날짜']} ({int(best_conv['구매'])}건). "
-            + (f"전환 발생일의 재방문자 평균({ret_on_conv:.0f}명)이 전체 평균({ret_overall:.0f}명)보다 높음 → "
-               f"한 번 본 후 재방문해서 결제하는 패턴 확인. 리타게팅 효과 작동 중." if ret_on_conv > ret_overall * 1.1 else
-               f"신규 방문자가 전환까지 바로 이어지는 케이스도 포함 — 콘텐츠/프로모션 직접 구매 설득력 있음.")
-        )
-    elif total_conv == 0 and total_spend > 0:
-        avg_bounce = df["이탈율"].mean()
-        insights.append(
-            f"**⚠️ 전환 0건 구간**\n"
-            f"광고비 {total_spend:,}원 집행했으나 전환 없음. "
-            f"평균 이탈율 {avg_bounce:.0f}% — "
-            + (f"이탈율이 높아 랜딩 직후 이탈이 주요 원인. 소재와 상품페이지 메시지 일관성 점검 필요." if avg_bounce >= 60
-               else f"이탈율은 양호하나 결제 미전환 — 가격 저항, 배송비, 리뷰 부족 등 결제 직전 장벽 점검 필요.")
+            f"**🔀 채널 기여 분석**\n"
+            f"{ch_str}. 이 기간 {top_ch}이 유입 1위. "
+            + (f"메타 광고 UTM 포착률 확인 필요 — 광고 클릭 대비 GA4 메타 유입 세션이 낮으면 UTM 파라미터 누락."
+               if top_ch != "메타광고" and total_spend > 0 else "")
+            + (" " + direct_ok if direct_ok else "")
         )
 
-    # ④ 채널 효율 분석
-    ch_totals = {
-        "메타광고":   int(df["유입_메타"].sum()),
-        "공식인스타": int(df["유입_공식"].sum()),
-        "개인인스타": int(df["유입_개인"].sum()),
-        "직접방문":   int(df["유입_직접"].sum()),
-    }
-    top_ch = max(ch_totals, key=ch_totals.get)
-    ch_str = " | ".join([f"{k} {v:,}명" for k, v in sorted(ch_totals.items(), key=lambda x: -x[1]) if v > 0])
-    direct_trend = "직접방문이 꾸준히 유입되는 것은 브랜드 인지도가 쌓이고 있는 긍정 신호." if ch_totals["직접방문"] >= 50 else ""
-    insights.append(
-        f"**🔀 채널 기여 분석**\n"
-        f"{ch_str}. 이 기간 {top_ch}이 유입 1위. "
-        + (f"메타 광고 UTM 포착률 확인 필요 — 광고 클릭 대비 GA4 메타 유입 세션이 낮으면 UTM 파라미터 누락." if top_ch != "메타광고" and total_spend > 0 else "")
-        + (" " + direct_trend if direct_trend else "")
+        if total_new >= 100:
+            insights.append(
+                f"**🎯 리타게팅 액션플랜**\n"
+                f"이 기간 신규 유입 {total_new:,}명으로 픽셀 모수 확충. "
+                f"재방문율 {round(total_ret/(total_new+total_ret)*100) if (total_new+total_ret)>0 else 0}% — "
+                f"나머지 {total_new - total_ret:,}명은 아직 재방문 안 함. "
+                f"이 모수를 대상으로 '프리오더 마감 임박' 또는 '재고 한정' 메시지로 리타게팅 집행 시 전환율 3~5배 기대 가능."
+            )
+        return insights
+
+    period_insights = generate_period_insight(df)
+    for i, insight in enumerate(period_insights):
+        border_colors = [COLOR["blue"], COLOR["accent"], COLOR["green"], COLOR["orange"], COLOR["purple"]]
+        bc = border_colors[i % len(border_colors)]
+        st.markdown(f"""
+        <div style="background:#FFFFFF;border-left:4px solid {bc};padding:16px 20px;border-radius:8px;
+                    font-size:13px;color:#1A1A1A;margin-bottom:12px;border:1px solid #EBEBEB;
+                    box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+        {insight.replace(chr(10), "<br>")}
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# ════════════════════════════════════════════════════════════════
+# TAB 2: 플랫폼별 매출 대시보드
+# ════════════════════════════════════════════════════════════════
+with tab2:
+
+    if df_platform_all.empty:
+        st.info("🏬 플랫폼 매출 데이터가 없어요. platform_to_sheets.py로 데이터를 먼저 업로드해 주세요.")
+        st.stop()
+
+    # ── 기간 필터 ─────────────────────────────────────────────────
+    pf_weeks = sorted(
+        df_platform_all["주차"].dropna().unique().tolist(),
+        key=lambda x: df_platform_all[df_platform_all["주차"]==x]["주문일_dt"].min()
     )
+    col_pf1, col_pf2, col_pf3 = st.columns([2, 2, 4])
+    with col_pf1:
+        pf_preset = st.selectbox("📅 조회 기간",
+            ["전체 기간", "최근 7일", "최근 30일"] + pf_weeks,
+            label_visibility="collapsed", key="tab2_preset")
+    with col_pf2:
+        st.markdown(f'<div style="padding:8px 0;color:#8C8C8C;font-size:13px;">{pf_preset} 기준</div>',
+                    unsafe_allow_html=True)
 
-    # ⑤ 픽셀 모수 & 리타게팅 액션플랜
-    if total_new >= 100:
+    now = pd.Timestamp.now()
+    if pf_preset == "전체 기간":
+        pf = df_platform_all.copy()
+    elif pf_preset in pf_weeks:
+        pf = df_platform_all[df_platform_all["주차"] == pf_preset].copy()
+    elif pf_preset == "최근 7일":
+        cutoff = now - pd.Timedelta(days=7)
+        pf = df_platform_all[df_platform_all["주문일_dt"] >= cutoff].copy()
+    else:
+        cutoff = now - pd.Timedelta(days=30)
+        pf = df_platform_all[df_platform_all["주문일_dt"] >= cutoff].copy()
+
+    pf = pf.reset_index(drop=True)
+
+    # 주문상태 필터 (취소 포함)
+    pf_valid   = pf                                    # 전체 (취소 포함)
+    pf_normal  = pf[~pf["주문상태"].str.contains("취소", na=False)]  # 취소 제외
+
+    st.markdown("---")
+
+    # ── KPI 카드 ──────────────────────────────────────────────────
+    total_sales   = int(pf_normal["판매가"].sum())
+    total_profit  = int(pf_normal["실수익"].sum())
+    total_orders  = len(pf_normal)
+    avg_price_pf  = int(total_sales / total_orders) if total_orders > 0 else 0
+    profit_rate   = round(total_profit / total_sales * 100, 1) if total_sales > 0 else 0
+    cancel_cnt    = len(pf[pf["주문상태"].str.contains("취소", na=False)])
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    with c1: kpi_card("총 매출액", fmt_num(total_sales, "원"))
+    with c2: kpi_card("총 실수익", fmt_num(total_profit, "원"), f"수익률 {profit_rate}%", profit_rate >= 65)
+    with c3: kpi_card("총 주문 건수", f"{total_orders:,}건", f"취소 {cancel_cnt}건")
+    with c4: kpi_card("평균 객단가", f"{avg_price_pf:,}원")
+    with c5: kpi_card("취소율", f"{round(cancel_cnt/(total_orders+cancel_cnt)*100) if (total_orders+cancel_cnt)>0 else 0}%",
+                      f"취소 {cancel_cnt}건")
+    with c6: kpi_card("수익률", f"{profit_rate}%",
+                      "목표 70% 이상" if profit_rate < 70 else "✓ 목표 달성",
+                      profit_rate >= 70)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 플랫폼별 미니 카드 ────────────────────────────────────────
+    platforms_avail = [p for p in ["29CM", "W컨셉", "SSF", "SI Village"]
+                       if p in pf_normal["플랫폼"].values]
+    if platforms_avail:
+        pf_cols = st.columns(len(platforms_avail))
+        for i, pname in enumerate(platforms_avail):
+            sub = pf_normal[pf_normal["플랫폼"] == pname]
+            s   = int(sub["판매가"].sum())
+            pr  = int(sub["실수익"].sum())
+            cnt = len(sub)
+            rate= round(pr/s*100, 1) if s > 0 else 0
+            with pf_cols[i]:
+                kpi_card_sm(
+                    pname,
+                    fmt_num(s, "원"),
+                    badge_color=PLATFORM_COLORS.get(pname, "#888"),
+                    sub=f"{cnt}건 | 실수익 {fmt_num(pr)}원 | 수익률 {rate}%"
+                )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 차트 A: 도넛 + 일별 매출 트렌드 ──────────────────────────
+    col_a, col_b = st.columns([2, 3])
+
+    with col_a:
+        chart_container("플랫폼별 매출 비중", "어느 채널이 가장 많이 팔리는지")
+        pf_sales = pf_normal.groupby("플랫폼")["판매가"].sum().reset_index()
+        pf_sales = pf_sales[pf_sales["판매가"] > 0]
+        if not pf_sales.empty:
+            colors_donut = [PLATFORM_COLORS.get(p, "#888") for p in pf_sales["플랫폼"]]
+            fig_d = go.Figure(go.Pie(
+                labels=pf_sales["플랫폼"],
+                values=pf_sales["판매가"],
+                hole=0.52,
+                marker=dict(colors=colors_donut, line=dict(color="white", width=2)),
+                textinfo="label+percent",
+                textfont=dict(size=12),
+                hovertemplate="<b>%{label}</b><br>%{value:,}원 (%{percent})<extra></extra>",
+            ))
+            fig_d.update_layout(
+                height=300, margin=dict(l=0, r=0, t=10, b=10),
+                showlegend=False,
+                annotations=[dict(text=f"총<br>{fmt_num(total_sales)}원",
+                                  x=0.5, y=0.5, font_size=13, font_color="#1A1A1A",
+                                  showarrow=False)]
+            )
+            st.plotly_chart(fig_d, use_container_width=True)
+
+    with col_b:
+        chart_container("일별 플랫폼별 매출 트렌드", "날짜별로 어느 플랫폼에서 매출이 발생했는지")
+        pf_daily = (pf_normal.groupby(["주문일", "플랫폼"])["판매가"]
+                    .sum().reset_index().sort_values("주문일"))
+        if not pf_daily.empty:
+            fig_t = go.Figure()
+            for pname in pf_daily["플랫폼"].unique():
+                sub_t = pf_daily[pf_daily["플랫폼"] == pname]
+                fig_t.add_trace(go.Scatter(
+                    x=sub_t["주문일"], y=sub_t["판매가"],
+                    name=pname,
+                    mode="lines+markers",
+                    line=dict(color=PLATFORM_COLORS.get(pname, "#888"), width=2),
+                    marker=dict(size=6),
+                    hovertemplate=f"<b>%{{x}}</b><br>{pname}: %{{y:,}}원<extra></extra>",
+                ))
+            fig_t.update_layout(
+                height=300, margin=dict(l=0, r=0, t=10, b=0),
+                plot_bgcolor="white", paper_bgcolor="white",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11),
+                           tickformat=",", title="매출액 (원)"),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_t, use_container_width=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 차트 B: 플랫폼별 실수익 누적 바 ──────────────────────────
+    chart_container("플랫폼별 실수익 비교", "수수료 차감 후 실제로 남는 금액")
+    pf_profit = pf_normal.groupby("플랫폼").agg(
+        매출=("판매가", "sum"),
+        실수익=("실수익", "sum"),
+        주문수=("판매가", "count")
+    ).reset_index().sort_values("매출", ascending=False)
+
+    if not pf_profit.empty:
+        fig_p = go.Figure()
+        fig_p.add_trace(go.Bar(
+            x=pf_profit["플랫폼"], y=pf_profit["매출"],
+            name="총 매출",
+            marker_color=[PLATFORM_COLORS.get(p, "#888") for p in pf_profit["플랫폼"]],
+            opacity=0.4,
+            hovertemplate="<b>%{x}</b><br>총 매출: %{y:,}원<extra></extra>",
+        ))
+        fig_p.add_trace(go.Bar(
+            x=pf_profit["플랫폼"], y=pf_profit["실수익"],
+            name="실수익",
+            marker_color=[PLATFORM_COLORS.get(p, "#888") for p in pf_profit["플랫폼"]],
+            opacity=1.0,
+            hovertemplate="<b>%{x}</b><br>실수익: %{y:,}원<extra></extra>",
+        ))
+        fig_p.update_layout(
+            height=280, margin=dict(l=0, r=0, t=10, b=0),
+            plot_bgcolor="white", paper_bgcolor="white",
+            barmode="overlay",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            xaxis=dict(showgrid=False, tickfont=dict(size=13, color="#1A1A1A")),
+            yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), tickformat=","),
+        )
+        st.plotly_chart(fig_p, use_container_width=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 차트 C: 상품 TOP 10 ───────────────────────────────────────
+    chart_container("베스트셀러 TOP 10", "매출 기준 인기 상품 순위")
+    top10 = (pf_normal.groupby("상품명")
+             .agg(매출=("판매가", "sum"), 수량=("수량", "sum"), 주문수=("판매가", "count"))
+             .reset_index()
+             .sort_values("매출", ascending=False)
+             .head(10))
+
+    if not top10.empty:
+        top10_sorted = top10.sort_values("매출", ascending=True)
+        # 상품명 짧게 자르기
+        top10_sorted["상품명_short"] = top10_sorted["상품명"].apply(
+            lambda x: x[:22] + "…" if len(str(x)) > 22 else str(x)
+        )
+        fig_top = go.Figure(go.Bar(
+            x=top10_sorted["매출"],
+            y=top10_sorted["상품명_short"],
+            orientation="h",
+            marker_color=COLOR["blue"],
+            marker_line_width=0,
+            text=top10_sorted["매출"].apply(lambda v: fmt_num(v, "원")),
+            textposition="outside",
+            customdata=top10_sorted[["수량", "주문수"]].values,
+            hovertemplate="<b>%{y}</b><br>매출: %{x:,}원<br>수량: %{customdata[0]}개 | 주문: %{customdata[1]}건<extra></extra>",
+        ))
+        fig_top.update_layout(
+            height=max(300, len(top10) * 38),
+            margin=dict(l=0, r=80, t=10, b=0),
+            plot_bgcolor="white", paper_bgcolor="white",
+            xaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), tickformat=","),
+            yaxis=dict(showgrid=False, tickfont=dict(size=12)),
+        )
+        st.plotly_chart(fig_top, use_container_width=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 상세 주문 테이블 (접기) ────────────────────────────────────
+    with st.expander("📋 전체 주문 내역 보기"):
+        display_cols = [c for c in ["플랫폼", "주문일", "상품명", "컬러", "사이즈", "수량", "판매가", "수수료율(%)", "실수익", "주문상태"]
+                        if c in pf.columns]
+        pf_display = pf[display_cols].copy()
+        pf_display["판매가"] = pf_display["판매가"].apply(lambda x: f"{int(x):,}")
+        pf_display["실수익"] = pf_display["실수익"].apply(lambda x: f"{int(x):,}")
+        st.dataframe(pf_display, use_container_width=True, hide_index=True)
+
+    # ── 플랫폼 인사이트 ────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("---")
+    chart_container("🔍 플랫폼 매출 인사이트", f"선택 기간 {pf_preset} | 취소 제외 {total_orders}건 기준")
+
+    def generate_platform_insight(pf_normal, pf_all):
+        insights = []
+        if pf_normal.empty:
+            return ["데이터가 없어요."]
+
+        total_s  = int(pf_normal["판매가"].sum())
+        total_p  = int(pf_normal["실수익"].sum())
+        total_o  = len(pf_normal)
+        cancel_c = len(pf_all[pf_all["주문상태"].str.contains("취소", na=False)])
+        cancel_r = round(cancel_c / (total_o + cancel_c) * 100) if (total_o + cancel_c) > 0 else 0
+        p_rate   = round(total_p / total_s * 100, 1) if total_s > 0 else 0
+        avg_pr   = int(total_s / total_o) if total_o > 0 else 0
+
+        # ① 전체 요약
         insights.append(
-            f"**🎯 리타게팅 액션플랜**\n"
-            f"이 기간 신규 유입 {total_new:,}명으로 픽셀 모수 확충. "
-            f"재방문율 {round(total_ret/(total_new+total_ret)*100) if (total_new+total_ret)>0 else 0}% — "
-            f"나머지 {total_new - total_ret:,}명은 아직 재방문 안 함. "
-            f"이 모수를 대상으로 '프리오더 마감 임박' 또는 '재고 한정' 메시지로 리타게팅 집행 시 전환율 3~5배 기대 가능."
+            f"**📊 플랫폼 통합 성과**\n"
+            f"총 매출 {total_s:,}원 | 실수익 {total_p:,}원 (수익률 {p_rate}%). "
+            f"총 {total_o}건 주문, 취소율 {cancel_r}%. 평균 객단가 {avg_pr:,}원. "
+            f"{'수익률이 목표(70%) 미달 — 수수료율 재협상 또는 고마진 상품 비중 확대 검토.' if p_rate < 70 else '수익률 목표(70%) 달성 ✓ — 현재 플랫폼 믹스 유지.'}"
         )
 
-    return insights
+        # ② 플랫폼별 효율 비교
+        pf_stats = pf_normal.groupby("플랫폼").agg(
+            매출=("판매가", "sum"), 실수익=("실수익", "sum"), 주문수=("판매가", "count")
+        ).reset_index()
+        if len(pf_stats) > 1:
+            best_p  = pf_stats.loc[pf_stats["매출"].idxmax(), "플랫폼"]
+            best_s  = int(pf_stats.loc[pf_stats["매출"].idxmax(), "매출"])
+            worst_p = pf_stats.loc[pf_stats["매출"].idxmin(), "플랫폼"]
+            # 수익률 기준 최고
+            pf_stats["수익률"] = pf_stats["실수익"] / pf_stats["매출"] * 100
+            best_rate_p = pf_stats.loc[pf_stats["수익률"].idxmax(), "플랫폼"]
+            best_rate   = round(pf_stats["수익률"].max(), 1)
+            insights.append(
+                f"**🏆 플랫폼 효율 비교**\n"
+                f"매출 1위: {best_p} ({best_s:,}원). "
+                f"수익률 1위: {best_rate_p} ({best_rate}%). "
+                f"{worst_p}는 이 기간 매출 최소 — 상품 노출 방식이나 등록 상품 수를 점검하거나, 해당 플랫폼 고객층에 맞는 상품을 추가 입점 검토."
+            )
 
-period_insights = generate_period_insight(df)
-for i, insight in enumerate(period_insights):
-    border_colors = [COLOR["blue"], COLOR["accent"], COLOR["green"], COLOR["orange"], COLOR["purple"]]
-    bc = border_colors[i % len(border_colors)]
-    st.markdown(f"""
-    <div style="background:#FFFFFF;border-left:4px solid {bc};padding:16px 20px;border-radius:8px;
-                font-size:13px;color:#1A1A1A;margin-bottom:12px;border:1px solid #EBEBEB;
-                box-shadow:0 1px 3px rgba(0,0,0,0.04);">
-    {insight.replace(chr(10), "<br>")}
-    </div>
-    """, unsafe_allow_html=True)
+        # ③ 취소율 진단
+        if cancel_r >= 15:
+            top_cancel_pf = (pf_all[pf_all["주문상태"].str.contains("취소", na=False)]
+                             .groupby("플랫폼").size().idxmax()
+                             if cancel_c > 0 else "—")
+            insights.append(
+                f"**⚠️ 취소율 {cancel_r}% — 높음**\n"
+                f"취소 {cancel_c}건 발생. 집중 플랫폼: {top_cancel_pf}. "
+                f"취소 원인 상위는 ①배송 지연 ②사이즈 불만 ③단순 변심. "
+                f"상품 상세페이지에 사이즈 가이드 강화 + 빠른 출고 메시지 노출로 취소율 낮출 수 있음."
+            )
+        elif cancel_r > 0:
+            insights.append(
+                f"**✅ 취소율 {cancel_r}% — 양호**\n"
+                f"취소 {cancel_c}건으로 관리 가능한 수준. 취소 사유 모니터링 유지."
+            )
+
+        # ④ 베스트셀러 분석
+        if not pf_normal.empty:
+            top1 = (pf_normal.groupby("상품명")["판매가"].sum().idxmax())
+            top1_sales = int(pf_normal.groupby("상품명")["판매가"].sum().max())
+            top1_qty   = int(pf_normal[pf_normal["상품명"]==top1]["수량"].sum())
+            top1_share = round(top1_sales / total_s * 100) if total_s > 0 else 0
+            insights.append(
+                f"**🔥 베스트셀러 집중도**\n"
+                f"1위 상품 '{top1[:20]}{'...' if len(top1)>20 else ''}' — {top1_qty}개 판매, 매출 {top1_sales:,}원 (전체의 {top1_share}%). "
+                f"{'1위 집중도가 높음 — 해당 상품 재고 관리를 최우선으로 하고, 유사 스타일 신상품 입점을 통해 의존도 분산 필요.' if top1_share >= 40 else '매출이 여러 상품에 분산되어 있음 — 안정적인 구조. 베스트 상품군 중심으로 광고 소재 제작 시 전환율 개선 효과 기대.'}"
+            )
+
+        # ⑤ 액션플랜
+        insights.append(
+            f"**🎯 다음 스텝 액션플랜**\n"
+            f"① 수익률 {p_rate}% {'→ 고마진 상품 추가 등록으로 70%대 목표.' if p_rate < 70 else '유지 — OK.'} "
+            f"② 취소율 {'관리 필요 — 상품설명 보강.' if cancel_r >= 15 else '양호 — 모니터링 유지.'} "
+            f"③ 베스트셀러 중심으로 플랫폼 광고(셀렉티드/기획전) 신청 검토. "
+            f"④ 월별 플랫폼 매출 비교로 성장 채널 집중 투자."
+        )
+
+        return insights
+
+    pf_insights = generate_platform_insight(pf_normal, pf)
+    for i, insight in enumerate(pf_insights):
+        border_colors = [COLOR["blue"], COLOR["purple"], COLOR["orange"], COLOR["green"], COLOR["accent"]]
+        bc = border_colors[i % len(border_colors)]
+        st.markdown(f"""
+        <div style="background:#FFFFFF;border-left:4px solid {bc};padding:16px 20px;border-radius:8px;
+                    font-size:13px;color:#1A1A1A;margin-bottom:12px;border:1px solid #EBEBEB;
+                    box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+        {insight.replace(chr(10), "<br>")}
+        </div>
+        """, unsafe_allow_html=True)
+
 
 # ── 푸터 ───────────────────────────────────────────────────────────
 st.markdown("---")
