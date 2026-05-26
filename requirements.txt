@@ -5,3 +5,4 @@ google-auth-oauthlib>=1.2.0
 google-api-python-client>=2.120.0
 pandas>=2.0.0
 plotly>=5.20.0
+google-analytics-data>=0.18.0
