@@ -40,10 +40,12 @@ CHANNEL_COLORS = {
 }
 
 PLATFORM_COLORS = {
-    "29CM":       "#1A1A1A",
-    "W컨셉":      "#7B4FBD",
-    "SSF":        "#E8420A",
-    "SI Village": "#C8A951",
+    "29CM":       "#E94B3C",   # 레드
+    "W컨셉":      "#5B3F9E",   # 딥 퍼플
+    "SSF":        "#0077C8",   # 삼성 블루
+    "SI Village": "#C8A951",   # 신세계 골드
+    "무신사":     "#222222",   # 무신사 블랙
+    "Cafe24":     "#4ECBA0",   # 그린
 }
 
 st.set_page_config(
@@ -300,7 +302,22 @@ def load_platform_data():
             df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
 
     if "주문일" in df.columns:
-        df["주문일_dt"] = pd.to_datetime(df["주문일"], errors="coerce")
+        def _safe_dt(s):
+            s = str(s).strip()
+            if s in ('', 'None', 'nan', '-', 'NaT'):
+                return pd.NaT
+            try:
+                return pd.to_datetime(s, format="%Y-%m-%d")
+            except Exception:
+                pass
+            try:
+                return pd.to_datetime(s)
+            except Exception:
+                return pd.NaT
+
+        df["주문일_dt"] = df["주문일"].apply(_safe_dt)
+        # 날짜 없는 행 제거 (빈 행 방지)
+        df = df[df["주문일_dt"].notna()].reset_index(drop=True)
         df["주차"] = df["주문일_dt"].apply(
             lambda d: f"{d.month}월 {((d.day - 1) // 7) + 1}주차" if pd.notna(d) else ""
         )
@@ -710,18 +727,29 @@ with tab2:
         st.stop()
 
     # ── 기간 필터 ─────────────────────────────────────────────────
+    # 주차 목록 (주차별 필터 옵션)
+    _valid_weeks = df_platform_all[df_platform_all["주차"].str.strip() != ""]["주차"].dropna().unique().tolist()
     pf_weeks = sorted(
-        df_platform_all["주차"].dropna().unique().tolist(),
+        _valid_weeks,
         key=lambda x: df_platform_all[df_platform_all["주차"]==x]["주문일_dt"].min()
     )
+    _preset_options = ["전체 기간", "최근 7일", "최근 30일"] + pf_weeks
+
     col_pf1, col_pf2, col_pf3 = st.columns([2, 2, 4])
     with col_pf1:
-        pf_preset = st.selectbox("📅 조회 기간",
-            ["전체 기간", "최근 7일", "최근 30일"] + pf_weeks,
-            label_visibility="collapsed", key="tab2_preset")
+        pf_preset = st.selectbox(
+            "📅 조회 기간",
+            _preset_options,
+            label_visibility="collapsed",
+            key="tab2_preset",
+            help="주차별 선택 시 해당 주 데이터만 표시"
+        )
     with col_pf2:
-        st.markdown(f'<div style="padding:8px 0;color:#8C8C8C;font-size:13px;">{pf_preset} 기준</div>',
-                    unsafe_allow_html=True)
+        order_count = len(df_platform_all)
+        st.markdown(
+            f'<div style="padding:8px 0;color:#8C8C8C;font-size:13px;">📦 전체 {order_count}건 중 {pf_preset}</div>',
+            unsafe_allow_html=True
+        )
 
     now = pd.Timestamp.now()
     if pf_preset == "전체 기간":
@@ -765,7 +793,7 @@ with tab2:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 플랫폼별 미니 카드 ────────────────────────────────────────
-    platforms_avail = [p for p in ["29CM", "W컨셉", "SSF", "SI Village"]
+    platforms_avail = [p for p in ["29CM", "W컨셉", "SSF", "SI Village", "무신사", "Cafe24"]
                        if p in pf_normal["플랫폼"].values]
     if platforms_avail:
         pf_cols = st.columns(len(platforms_avail))
@@ -814,30 +842,47 @@ with tab2:
 
     with col_b:
         chart_container("일별 플랫폼별 매출 트렌드", "날짜별로 어느 플랫폼에서 매출이 발생했는지")
-        pf_daily = (pf_normal.groupby(["주문일", "플랫폼"])["판매가"]
-                    .sum().reset_index().sort_values("주문일"))
+        # 핵심 fix: 주문일_dt(datetime) 기준으로 그룹핑 → Jan 2000 버그 해결
+        pf_trend_src = pf_normal.dropna(subset=["주문일_dt"]).copy()
+        pf_daily = (pf_trend_src
+                    .groupby(["주문일_dt", "플랫폼"])["판매가"]
+                    .sum().reset_index()
+                    .sort_values("주문일_dt"))
         if not pf_daily.empty:
             fig_t = go.Figure()
             for pname in pf_daily["플랫폼"].unique():
-                sub_t = pf_daily[pf_daily["플랫폼"] == pname]
+                sub_t = pf_daily[pf_daily["플랫폼"] == pname].copy()
+                _mode = "lines+markers" if len(sub_t) > 1 else "markers"
+                _msize = 8 if len(sub_t) == 1 else 6
                 fig_t.add_trace(go.Scatter(
-                    x=sub_t["주문일"], y=sub_t["판매가"],
+                    x=sub_t["주문일_dt"],
+                    y=sub_t["판매가"],
                     name=pname,
-                    mode="lines+markers",
-                    line=dict(color=PLATFORM_COLORS.get(pname, "#888"), width=2),
-                    marker=dict(size=6),
-                    hovertemplate=f"<b>%{{x}}</b><br>{pname}: %{{y:,}}원<extra></extra>",
+                    mode=_mode,
+                    line=dict(color=PLATFORM_COLORS.get(pname, "#888"), width=2.5),
+                    marker=dict(size=_msize, color=PLATFORM_COLORS.get(pname, "#888"),
+                                line=dict(color="white", width=1.5)),
+                    hovertemplate=(
+                        f"<b>%{{x|%Y-%m-%d}}</b><br>{pname}: %{{y:,}}원<extra></extra>"
+                    ),
                 ))
             fig_t.update_layout(
                 height=300, margin=dict(l=0, r=0, t=10, b=0),
                 plot_bgcolor="white", paper_bgcolor="white",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+                xaxis=dict(
+                    type="date",               # 명시적 date 타입 지정 — Jan 2000 버그 방지
+                    showgrid=False,
+                    tickfont=dict(size=11),
+                    tickformat="%m/%d",        # MM/DD 형식 표기
+                ),
                 yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11),
                            tickformat=",", title="매출액 (원)"),
                 hovermode="x unified",
             )
             st.plotly_chart(fig_t, use_container_width=True)
+        else:
+            st.info("선택 기간에 날짜 데이터가 없어요.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
