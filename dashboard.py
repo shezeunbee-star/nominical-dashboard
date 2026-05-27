@@ -11,7 +11,19 @@ import gspread
 from google.oauth2.service_account import Credentials as SACredentials
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from google.auth.transport.requests import Request
-import json, os
+import json, os, time
+import requests as _requests
+
+# ── GA4 API imports (lazy-safe) ────────────────────────────────────
+try:
+    from google.analytics.data_v1beta import BetaAnalyticsDataClient
+    from google.analytics.data_v1beta.types import (
+        RunReportRequest, Dimension, Metric, DateRange,
+        FilterExpression, Filter, FilterExpressionList,
+    )
+    _GA4_AVAILABLE = True
+except ImportError:
+    _GA4_AVAILABLE = False
 
 # ── 설정 ───────────────────────────────────────────────────────────
 SPREADSHEET_ID      = "1y9mZirj81sR2tkkGV_wTzFvJonPdJU-JuErSRDo_73E"
@@ -329,6 +341,196 @@ def load_platform_data():
 
 
 # ══════════════════════════════════════════════════════════════════
+# 자동 업데이트 함수 (새로고침 버튼에서 호출)
+# ══════════════════════════════════════════════════════════════════
+
+def _get_sheet_creds(extra_scopes=None):
+    """SA(시크릿) 또는 OAuth(로컬 token.json) 인증 반환 — Sheets 전용"""
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"] + (extra_scopes or [])
+    if "gcp_service_account" in st.secrets:
+        return SACredentials.from_service_account_info(
+            dict(st.secrets["gcp_service_account"]), scopes=scopes
+        )
+    token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
+    creds = OAuthCredentials.from_authorized_user_file(token_path, scopes)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    return creds
+
+
+def _get_oauth_creds():
+    """OAuth 자격증명 반환 — GA4 + Sheets 동시 접근용.
+    Streamlit secrets의 google_token_json 또는 로컬 token.json 사용."""
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/analytics.readonly",
+    ]
+    token_json = st.secrets.get("google_token_json")
+    if token_json:
+        token_info = json.loads(token_json) if isinstance(token_json, str) else dict(token_json)
+        creds = OAuthCredentials.from_authorized_user_info(token_info, scopes)
+    else:
+        token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
+        creds = OAuthCredentials.from_authorized_user_file(token_path, scopes)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    return creds
+
+
+def update_ga4_yesterday():
+    """어제 GA4 데이터를 시트 K~V열에 업데이트. (bool, str) 반환."""
+    if not _GA4_AVAILABLE:
+        return False, "google-analytics-data 패키지가 설치되어 있지 않아요."
+    try:
+        from datetime import date, timedelta
+
+        GA4_PROPERTY_ID = "536368183"
+        creds           = _get_oauth_creds()   # OAuth: Sheets + GA4 동시 접근
+        ga4             = BetaAnalyticsDataClient(credentials=creds)
+        gc              = gspread.authorize(creds)
+        ws              = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+        yesterday = date.today() - timedelta(days=1)
+        date_str  = yesterday.strftime("%Y-%m-%d")
+        day_label = f"{yesterday.month}/{yesterday.day}"
+
+        def run_report(dimensions, metrics, filter_expr=None):
+            req = RunReportRequest(
+                property=f"properties/{GA4_PROPERTY_ID}",
+                dimensions=[Dimension(name=d) for d in dimensions],
+                metrics=[Metric(name=m) for m in metrics],
+                date_ranges=[DateRange(start_date=date_str, end_date=date_str)],
+            )
+            if filter_expr:
+                req.dimension_filter = filter_expr
+            return ga4.run_report(req)
+
+        # 전체 지표
+        res = run_report(
+            ["date"],
+            ["sessions", "transactions", "bounceRate", "averagePurchaseRevenue", "purchaseRevenue"],
+        )
+        sessions = transactions = bounce = avg_price = revenue = 0
+        if res.rows:
+            r            = res.rows[0].metric_values
+            sessions     = int(float(r[0].value))
+            transactions = int(float(r[1].value))
+            bounce       = round(float(r[2].value) * 100, 1)
+            avg_price    = round(float(r[3].value))
+            revenue      = round(float(r[4].value))
+
+        def get_channel(source, medium):
+            f = FilterExpression(and_group=FilterExpressionList(expressions=[
+                FilterExpression(filter=Filter(field_name="sessionSource",
+                    string_filter=Filter.StringFilter(value=source, match_type="EXACT"))),
+                FilterExpression(filter=Filter(field_name="sessionMedium",
+                    string_filter=Filter.StringFilter(value=medium, match_type="EXACT"))),
+            ]))
+            r2 = run_report(["sessionSource"], ["sessions"], f)
+            return int(float(r2.rows[0].metric_values[0].value)) if r2.rows else 0
+
+        time.sleep(0.3)
+        ch_meta     = get_channel("meta", "paid_feed") + get_channel("ig", "paid")
+        time.sleep(0.3)
+        ch_official = get_channel("instagram", "bio")
+        time.sleep(0.3)
+        ch_personal = get_channel("instagram", "personal_bio") + get_channel("instagram", "personal_story")
+        time.sleep(0.3)
+
+        f_direct  = FilterExpression(filter=Filter(field_name="sessionMedium",
+            string_filter=Filter.StringFilter(value="(none)", match_type="EXACT")))
+        r_direct  = run_report(["sessionMedium"], ["sessions"], f_direct)
+        ch_direct = int(float(r_direct.rows[0].metric_values[0].value)) if r_direct.rows else 0
+
+        res_new        = run_report(["newVsReturning"], ["activeUsers"])
+        new_users = returning_users = 0
+        for row in res_new.rows:
+            val = int(float(row.metric_values[0].value))
+            if row.dimension_values[0].value == "new":
+                new_users = val
+            else:
+                returning_users = val
+
+        all_dates = ws.col_values(1)
+        row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
+        if not row_idx:
+            return False, f"'{day_label}' 날짜를 시트에서 찾을 수 없어요. 시트에 해당 날짜 행을 추가해 주세요."
+
+        ws.update(values=[[sessions, transactions]], range_name=f"K{row_idx}:L{row_idx}")
+        time.sleep(0.2)
+        ws.update(
+            values=[[bounce, avg_price, revenue, ch_meta, ch_official, ch_personal, ch_direct]],
+            range_name=f"N{row_idx}:T{row_idx}",
+        )
+        time.sleep(0.2)
+        ws.update(values=[[new_users, returning_users]], range_name=f"U{row_idx}:V{row_idx}")
+
+        return True, f"✅ GA4 {day_label} 완료 — 방문자 {sessions:,}명 · 구매 {transactions}건"
+
+    except Exception as e:
+        return False, f"❌ GA4 업데이트 실패: {e}"
+
+
+def update_meta_yesterday():
+    """어제 메타 광고 데이터를 시트 C~H열에 업데이트. (bool, str) 반환."""
+    try:
+        from datetime import date, timedelta
+
+        # Meta 토큰 우선순위: secrets → 로컬 파일
+        meta_token = st.secrets.get("meta_access_token") or st.secrets.get("META_ACCESS_TOKEN")
+        if not meta_token:
+            _tf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta_token.txt")
+            if os.path.exists(_tf):
+                meta_token = open(_tf).read().strip()
+        if not meta_token:
+            return False, "❌ Meta 토큰 없음. Streamlit secrets에 meta_access_token을 추가해 주세요."
+
+        AD_ACCOUNT = "act_1599099620677018"
+
+        creds = _get_sheet_creds()
+        gc    = gspread.authorize(creds)
+        ws    = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+        yesterday = date.today() - timedelta(days=1)
+        date_str  = yesterday.strftime("%Y-%m-%d")
+        day_label = f"{yesterday.month}/{yesterday.day}"
+
+        res = _requests.get(
+            f"https://graph.facebook.com/v25.0/{AD_ACCOUNT}/insights",
+            params={
+                "fields":     "spend,impressions,clicks,ctr,cpc,actions,purchase_roas",
+                "time_range": f'{{"since":"{date_str}","until":"{date_str}"}}',
+                "access_token": meta_token,
+            },
+            timeout=15,
+        ).json()
+
+        spend = impressions = clicks = purchases = 0
+        if res.get("data"):
+            d           = res["data"][0]
+            spend       = round(float(d.get("spend", 0)))
+            impressions = int(d.get("impressions", 0))
+            clicks      = int(d.get("clicks", 0))
+            for action in d.get("actions", []):
+                if action["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
+                    purchases = int(float(action["value"]))
+
+        all_dates = ws.col_values(1)
+        row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
+        if not row_idx:
+            return False, f"'{day_label}' 날짜를 시트에서 찾을 수 없어요."
+
+        ws.update(values=[[spend, impressions, clicks]], range_name=f"C{row_idx}:E{row_idx}")
+        time.sleep(0.2)
+        ws.update(values=[[purchases]], range_name=f"H{row_idx}")
+
+        return True, f"✅ Meta {day_label} 완료 — 광고비 {spend:,}원 · 전환 {purchases}건"
+
+    except Exception as e:
+        return False, f"❌ Meta 업데이트 실패: {e}"
+
+
+# ══════════════════════════════════════════════════════════════════
 # 메인
 # ══════════════════════════════════════════════════════════════════
 df_all          = load_data()
@@ -340,6 +542,17 @@ with col_logo:
     st.markdown("## 🏃 NOMINICAL 성과 대시보드")
 with col_refresh:
     if st.button("🔄 새로고침"):
+        with st.spinner("전일자 데이터 업데이트 중..."):
+            ok1, msg1 = update_ga4_yesterday()
+            ok2, msg2 = update_meta_yesterday()
+        if ok1:
+            st.toast(msg1, icon="✅")
+        else:
+            st.toast(msg1, icon="⚠️")
+        if ok2:
+            st.toast(msg2, icon="✅")
+        else:
+            st.toast(msg2, icon="⚠️")
         st.cache_data.clear()
         st.rerun()
 
@@ -1259,7 +1472,8 @@ with tab3:
                     .agg(매출=("판매가", "sum"), 수량=("수량", "sum"), 주문수=("판매가", "count"))
                     .reset_index().sort_values("매출", ascending=False).head(10)
                 )
-                t3_top_s = t3_top.sort_values("매출", ascending=True).copy()
+                t3_top_s = t3_top.sort_values("매출", ascending=True)
+                t3_top_s = t3_top_s.copy()
                 t3_top_s["상품명_s"] = t3_top_s["상품명"].apply(
                     lambda x: x[:24] + "…" if len(str(x)) > 24 else str(x)
                 )
