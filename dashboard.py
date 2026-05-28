@@ -690,38 +690,47 @@ with tab1:
     col_left, col_right = st.columns([3, 2])
 
     with col_left:
-        chart_container("광고 효율 추이", "CPO는 낮을수록, ROAS는 높을수록 좋음")
+        chart_container("광고 효율 추이", "광고비·CTR은 항상, CPO·ROAS는 전환 발생 시 표시")
         ad_df = df[df["광고비"] > 0].copy()
         if not ad_df.empty:
             fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+            # 광고비 막대 (항상 표시)
             fig2.add_trace(go.Bar(
-                x=ad_df["날짜"], y=ad_df["CPO"],
-                name="CPO (원)",
-                marker_color=COLOR["orange"],
-                opacity=0.8,
-                hovertemplate="<b>%{x}</b><br>CPO: %{y:,}원<extra></extra>",
+                x=ad_df["날짜"], y=ad_df["광고비"],
+                name="광고비 (원)",
+                marker_color=COLOR["blue"],
+                opacity=0.5,
+                hovertemplate="<b>%{x}</b><br>광고비: %{y:,}원<extra></extra>",
             ), secondary_y=False)
-            roas_df = ad_df[ad_df["ROAS"] > 0]
-            if not roas_df.empty:
+            # CTR 라인 (항상 표시)
+            ctr_df = ad_df[ad_df["CTR"] > 0]
+            if not ctr_df.empty:
                 fig2.add_trace(go.Scatter(
-                    x=roas_df["날짜"], y=roas_df["ROAS"],
-                    name="ROAS (배)",
+                    x=ctr_df["날짜"], y=ctr_df["CTR"],
+                    name="CTR (%)",
                     mode="lines+markers",
-                    line=dict(color=COLOR["green"], width=2.5),
-                    marker=dict(size=7, color=COLOR["green"]),
-                    hovertemplate="<b>%{x}</b><br>ROAS: %{y:.1f}배<extra></extra>",
+                    line=dict(color=COLOR["orange"], width=2),
+                    marker=dict(size=6, color=COLOR["orange"]),
+                    hovertemplate="<b>%{x}</b><br>CTR: %{y:.2f}%<extra></extra>",
                 ), secondary_y=True)
-            if avg_cpo > 0:
-                fig2.add_hline(y=avg_cpo, line_dash="dot", line_color=COLOR["gray"],
-                               annotation_text=f"평균 CPO {avg_cpo:,}원",
-                               annotation_position="top left", secondary_y=False)
+            # CPO 라인 (전환 있을 때만)
+            cpo_df = ad_df[ad_df["CPO"] > 0]
+            if not cpo_df.empty:
+                fig2.add_trace(go.Scatter(
+                    x=cpo_df["날짜"], y=cpo_df["CPO"],
+                    name="CPO (원)",
+                    mode="lines+markers",
+                    line=dict(color=COLOR["purple"], width=2, dash="dot"),
+                    marker=dict(size=6, color=COLOR["purple"]),
+                    hovertemplate="<b>%{x}</b><br>CPO: %{y:,}원<extra></extra>",
+                ), secondary_y=False)
             fig2.update_layout(
                 height=300, margin=dict(l=0, r=0, t=10, b=0),
                 plot_bgcolor="white", paper_bgcolor="white",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                 xaxis=dict(showgrid=False, tickfont=dict(size=11)),
-                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="CPO (원)"),
-                yaxis2=dict(showgrid=False, tickfont=dict(size=11), title="ROAS (배)"),
+                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), tickformat=","),
+                yaxis2=dict(showgrid=False, tickfont=dict(size=11)),
                 hovermode="x unified",
             )
             st.plotly_chart(fig2, use_container_width=True)
