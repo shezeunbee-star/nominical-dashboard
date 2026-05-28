@@ -365,7 +365,11 @@ def _get_oauth_creds():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/analytics.readonly",
     ]
-    token_json = st.secrets.get("google_token_json")
+    token_json = None
+    try:
+        token_json = st.secrets["google_token_json"]
+    except Exception:
+        pass
     if token_json:
         token_info = json.loads(token_json) if isinstance(token_json, str) else dict(token_json)
         creds = OAuthCredentials.from_authorized_user_info(token_info, scopes)
@@ -477,7 +481,14 @@ def update_meta_yesterday():
         from datetime import date, timedelta
 
         # Meta 토큰 우선순위: secrets → 로컬 파일
-        meta_token = st.secrets.get("meta_access_token") or st.secrets.get("META_ACCESS_TOKEN")
+        meta_token = None
+        for key in ("meta_access_token", "META_ACCESS_TOKEN", "meta_token"):
+            try:
+                meta_token = st.secrets[key]
+                if meta_token:
+                    break
+            except Exception:
+                pass
         if not meta_token:
             _tf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta_token.txt")
             if os.path.exists(_tf):
