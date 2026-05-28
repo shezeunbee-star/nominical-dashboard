@@ -690,7 +690,7 @@ with tab1:
     col_left, col_right = st.columns([3, 2])
 
     with col_left:
-        chart_container("광고 효율 추이", "광고비·CTR은 항상, CPO·ROAS는 전환 발생 시 표시")
+        chart_container("광고 효율 추이", "광고비·CTR 항상 표시 / CPO·ROAS는 전환 발생 시")
         ad_df = df[df["광고비"] > 0].copy()
         if not ad_df.empty:
             fig2 = make_subplots(specs=[[{"secondary_y": True}]])
@@ -724,6 +724,17 @@ with tab1:
                     marker=dict(size=6, color=COLOR["purple"]),
                     hovertemplate="<b>%{x}</b><br>CPO: %{y:,}원<extra></extra>",
                 ), secondary_y=False)
+            # ROAS 라인 (전환 있을 때만)
+            roas_df = ad_df[ad_df["ROAS"] > 0]
+            if not roas_df.empty:
+                fig2.add_trace(go.Scatter(
+                    x=roas_df["날짜"], y=roas_df["ROAS"],
+                    name="ROAS (배)",
+                    mode="lines+markers",
+                    line=dict(color=COLOR["green"], width=2.5),
+                    marker=dict(size=7, color=COLOR["green"]),
+                    hovertemplate="<b>%{x}</b><br>ROAS: %{y:.1f}배<extra></extra>",
+                ), secondary_y=True)
             fig2.update_layout(
                 height=300, margin=dict(l=0, r=0, t=10, b=0),
                 plot_bgcolor="white", paper_bgcolor="white",
