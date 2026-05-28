@@ -608,6 +608,17 @@ with tab1:
 
     st.markdown("---")
 
+    # ── 인사이트 박스 헬퍼 ────────────────────────────────────────
+    def insight_box(lines, color=None):
+        bc = color or COLOR["blue"]
+        body = "".join(f'<div style="margin-bottom:5px;">{l}</div>' for l in lines)
+        st.markdown(f"""
+        <div style="background:#FAFAFA;border-left:4px solid {bc};padding:13px 18px;
+                    border-radius:8px;font-size:13px;color:#1A1A1A;margin:8px 0 20px;
+                    border:1px solid #EBEBEB;">
+        {body}
+        </div>""", unsafe_allow_html=True)
+
     # KPI 카드
     ad_days   = df[df["광고비"] > 0]
     conv_days = df[df["구매"] > 0]
@@ -639,6 +650,26 @@ with tab1:
     with c4: kpi_card("누적 매출", fmt_num(total_revenue, "원"), f"ROAS {overall_roas}배", overall_roas >= 3)
     with c5: kpi_card("평균 CPO", f"{avg_cpo:,}원" if avg_cpo else "—", f"전환일 {len(conv_days)}일")
     with c6: kpi_card("신규방문 비율", f"{avg_new_rate}%", f"재방문 {100-avg_new_rate}%")
+
+    # ── KPI 인사이트 ──────────────────────────────────────────────
+    _kpi_lines = []
+    if len(prior) > 0 and prior["방문자"].sum() > 0:
+        _v  = round((recent["방문자"].sum() - prior["방문자"].sum()) / prior["방문자"].sum() * 100)
+        _sp = round((recent["광고비"].sum()  - prior["광고비"].sum())  / prior["광고비"].sum()  * 100) if prior["광고비"].sum() > 0 else None
+        _c  = int(recent["구매"].sum() - prior["구매"].sum())
+        _vc = f"<b style='color:{'#27AE60' if _v>=0 else '#E74C3C'}'>{'▲' if _v>=0 else '▼'}{abs(_v)}%</b>"
+        _sc = (f"<b style='color:{'#E74C3C' if _sp>=0 else '#27AE60'}'>{'▲' if _sp>=0 else '▼'}{abs(_sp)}%</b>") if _sp is not None else "—"
+        _cc = f"<b style='color:{'#27AE60' if _c>=0 else '#E74C3C'}'>{'▲' if _c>=0 else '▼'}{abs(_c)}건</b>"
+        _kpi_lines.append(f"📊 <b>지난 7일 vs 이전 7일</b> — 방문자 {_vc} · 광고비 {_sc} · 전환 {_cc}")
+    _nr_msg = "신규 비중이 높아 재방문 리타게팅 여지 큼." if avg_new_rate >= 70 else "재방문 비중이 올라오고 있음 — 구매 결정 장벽(가격·배송비·리뷰) 점검 권장."
+    _kpi_lines.append(f"👥 신규 <b>{avg_new_rate}%</b> / 재방문 <b>{100-avg_new_rate}%</b> — {_nr_msg}")
+    if total_spend > 0:
+        _rc = "#27AE60" if overall_roas >= 3 else ("#F39C12" if overall_roas >= 1.5 else "#E74C3C")
+        _rm = ("목표 ROAS 달성 — 예산 증액 검토 가능." if overall_roas >= 3
+               else "손익분기 근접 — 소재·타겟 최적화 후 증액 판단." if overall_roas >= 1.5
+               else "ROAS 1.5 미달 — 현 세팅으로 증액 시 손실. 타겟·소재 전면 점검 필요.")
+        _kpi_lines.append(f"💰 ROAS <b style='color:{_rc}'>{overall_roas}배</b> — {_rm}")
+    insight_box(_kpi_lines, COLOR["blue"])
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -683,6 +714,31 @@ with tab1:
     )
     fig1.update_layout(yaxis2=dict(overlaying="y", visible=False))
     st.plotly_chart(fig1, use_container_width=True)
+
+    # ── 방문자·전환 추이 인사이트 ─────────────────────────────────
+    _t1_lines = []
+    if len(df) > 1:
+        _max_day = df.loc[df["방문자"].idxmax()]
+        _avg_vis = df["방문자"].mean()
+        if _max_day["방문자"] > _avg_vis * 2:
+            _top_ch = max({"메타광고": _max_day["유입_메타"], "공식인스타": _max_day["유입_공식"],
+                           "개인인스타": _max_day["유입_개인"], "직접방문": _max_day["유입_직접"]}, key=lambda k: {"메타광고": _max_day["유입_메타"], "공식인스타": _max_day["유입_공식"], "개인인스타": _max_day["유입_개인"], "직접방문": _max_day["유입_직접"]}[k])
+            _t1_lines.append(f"📈 <b>{_max_day['날짜']} 트래픽 스파이크</b> — 평균 대비 {round(_max_day['방문자']/_avg_vis,1)}배 급등, 주요 유입: {_top_ch}.")
+    if total_purchases == 0 and total_spend > 0:
+        _avg_b = df["이탈율"].replace(0, float("nan")).mean()
+        if _avg_b and _avg_b >= 60:
+            _t1_lines.append(f"⚠️ <b>전환 0건</b> — 광고비 {total_spend:,}원 집행했으나 이탈율 평균 {_avg_b:.0f}%로 높음. <b>액션플랜:</b> 소재 이미지와 상품페이지 메시지 일관성 점검, 랜딩 상품 직링크로 교체.")
+        else:
+            _t1_lines.append(f"⚠️ <b>전환 0건</b> — 클릭은 유입되나 결제 미전환. <b>액션플랜:</b> 결제 페이지 내 배송비 노출 시점·리뷰 수·CTA 버튼 위치 점검 필요.")
+    elif total_purchases > 0:
+        _conv_rate_ok = overall_cvr >= 1.0
+        _cr_color = "#27AE60" if _conv_rate_ok else "#F39C12"
+        _t1_lines.append(f"🛍 전환율 <b style='color:{_cr_color}'>{overall_cvr}%</b> — {'양호. 트래픽 증가 시 전환 비례 상승 기대.' if _conv_rate_ok else '전환율 1% 미달. 방문자 대비 구매가 적음 — 상품 상세 페이지 설득력 강화 필요.'}")
+    if total_spend > 0 and len(ad_days) > 0:
+        _spend_trend = "증가" if ad_days["광고비"].iloc[-1] > ad_days["광고비"].mean() else "감소"
+        _t1_lines.append(f"💸 최근 광고비 {_spend_trend} 추세 — {'전환율 개선 없이 증액은 CPO 악화로 이어짐. 소재 교체 후 증액 순서 권장.' if _spend_trend == '증가' and total_purchases == 0 else '광고비와 전환이 함께 움직이는지 추이를 지속 모니터링.'}")
+    if _t1_lines:
+        insight_box(_t1_lines, COLOR["orange"])
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -745,6 +801,30 @@ with tab1:
                 hovermode="x unified",
             )
             st.plotly_chart(fig2, use_container_width=True)
+            # ── 광고 효율 인사이트 ────────────────────────────────
+            _ae_lines = []
+            _ctr_vals = ad_df[ad_df["CTR"] > 0]["CTR"]
+            if len(_ctr_vals) >= 3:
+                _ctr_avg   = _ctr_vals.mean()
+                _ctr_last  = _ctr_vals.iloc[-1]
+                _ctr_color = "#27AE60" if _ctr_last >= _ctr_avg else "#E74C3C"
+                _ctr_msg   = ("현재 소재 반응 양호. 예산 증액 고려 가능." if _ctr_last >= _ctr_avg * 1.1
+                              else "CTR이 평균 대비 하락 — 소재 피로 신호. 이미지·문구 교체 시점." if _ctr_last < _ctr_avg * 0.8
+                              else "CTR 안정적 유지 중.")
+                _ae_lines.append(f"📣 CTR <b style='color:{_ctr_color}'>{_ctr_last:.2f}%</b> (평균 {_ctr_avg:.2f}%) — {_ctr_msg}")
+            _roas_vals = ad_df[ad_df["ROAS"] > 0]["ROAS"]
+            if not _roas_vals.empty:
+                _roas_last  = _roas_vals.iloc[-1]
+                _roas_color = "#27AE60" if _roas_last >= 3 else ("#F39C12" if _roas_last >= 1.5 else "#E74C3C")
+                _ae_lines.append(f"💰 최근 ROAS <b style='color:{_roas_color}'>{_roas_last:.1f}배</b> — {'수익 구간. 소재·타겟 유지하며 예산 확대.' if _roas_last >= 3 else '손익분기 근처. 전환 소재 추가 테스트 권장.' if _roas_last >= 1.5 else 'ROAS 손실 구간. 현 캠페인 일시 중단 후 소재·타겟 재설정 필요.'}")
+            _cpo_vals = ad_df[ad_df["CPO"] > 0]["CPO"]
+            if len(_cpo_vals) >= 2:
+                _cpo_trend = "개선" if _cpo_vals.iloc[-1] < _cpo_vals.mean() else "악화"
+                _ae_lines.append(f"🎯 CPO 추이 <b>{'↓ ' if _cpo_trend=='개선' else '↑ '}{int(_cpo_vals.iloc[-1]):,}원</b> (평균 {int(_cpo_vals.mean()):,}원) — {'전환 효율 개선 중. 지금 타겟·소재 조합 유지 권장.' if _cpo_trend=='개선' else 'CPO 상승 중 — 타겟 오디언스 포화 또는 소재 피로. 유사 타겟 전환 또는 소재 A/B 테스트 시작.'}")
+            elif total_spend > 0 and total_purchases == 0:
+                _ae_lines.append(f"⚠️ 전환 미발생 — 광고비 집행 중이나 CPO·ROAS 산출 불가. <b>조치:</b> 픽셀 이벤트 정상 수신 여부 확인 후, 전환 캠페인 대신 트래픽 캠페인으로 모수 확보 후 리타게팅 전환 집행 고려.")
+            if _ae_lines:
+                insight_box(_ae_lines, COLOR["green"])
         else:
             st.info("광고 집행 데이터 없음")
 
@@ -812,17 +892,19 @@ with tab1:
         )
         st.plotly_chart(fig4, use_container_width=True)
 
-        pixel_total = int(nvr_df["신규"].sum())
-        latest_ret  = nvr_df["재방문"].iloc[-3:].mean()
-        early_ret   = nvr_df["재방문"].iloc[:max(1, len(nvr_df)-7)].mean()
-        ret_trend   = "📈 재방문자 증가 추세 — 브랜드 인지도 쌓이는 중" if latest_ret > early_ret * 1.2 else ""
-        st.markdown(f"""
-        <div style="background:#F0F9FF;border-left:4px solid {COLOR['blue']};padding:14px 18px;border-radius:8px;font-size:13px;color:#1A1A1A;">
-        📌 <b>누적 픽셀 모수 {pixel_total:,}명</b> — 리타게팅 캠페인이 이 모수 전체를 커버하도록 설정됐는지 확인.
-        신규 방문자는 방문 후 3~7일 내 리타게팅 시 전환율이 cold 대비 3~5배 높음.
-        {"&nbsp;&nbsp;|&nbsp;&nbsp;" + ret_trend if ret_trend else ""}
-        </div>
-        """, unsafe_allow_html=True)
+        _pixel_total = int(nvr_df["신규"].sum())
+        _latest_ret  = nvr_df["재방문"].iloc[-3:].mean()
+        _early_ret   = nvr_df["재방문"].iloc[:max(1, len(nvr_df)-7)].mean()
+        _ret_up      = _latest_ret > _early_ret * 1.2
+        _nr4_lines   = []
+        _nr4_lines.append(f"🎯 <b>누적 픽셀 모수 {_pixel_total:,}명</b> — 리타게팅 캠페인이 이 모수 전체를 커버하도록 설정됐는지 확인. 신규 방문 후 3~7일 내 리타게팅 시 전환율 cold 대비 3~5배 높음.")
+        if _ret_up:
+            _nr4_lines.append(f"📈 재방문자 최근 증가 추세 — 브랜드 인지도 누적 중. <b>액션플랜:</b> 재방문자 전용 '첫 구매 혜택' 리타게팅 광고 집행 타이밍.")
+        else:
+            _nr4_lines.append(f"📉 재방문 비율 정체 — 신규 방문자가 재방문으로 이어지지 않는 상황. <b>액션플랜:</b> 카카오 알림톡 또는 인스타 DM 팔로업, '장바구니 담기' 리마인드 광고 설정.")
+        if total_purchases == 0 and _pixel_total >= 100:
+            _nr4_lines.append(f"💡 전환 미발생이지만 모수 {_pixel_total:,}명 확보됨 — 지금이 '재고 한정·마감 임박' 메시지로 리타게팅 집행할 최적 타이밍.")
+        insight_box(_nr4_lines, COLOR["purple"])
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -851,12 +933,6 @@ with tab1:
                 hovermode="x unified",
             )
             st.plotly_chart(fig5, use_container_width=True)
-
-    # 기간 인사이트
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("---")
-    chart_container("🔍 기간 종합 인사이트",
-                    f"{df['날짜'].iloc[0]} ~ {df['날짜'].iloc[-1]} | {len(df)}일 분석")
 
     def generate_period_insight(df):
         insights = []
@@ -948,17 +1024,7 @@ with tab1:
             )
         return insights
 
-    period_insights = generate_period_insight(df)
-    for i, insight in enumerate(period_insights):
-        border_colors = [COLOR["blue"], COLOR["accent"], COLOR["green"], COLOR["orange"], COLOR["purple"]]
-        bc = border_colors[i % len(border_colors)]
-        st.markdown(f"""
-        <div style="background:#FFFFFF;border-left:4px solid {bc};padding:16px 20px;border-radius:8px;
-                    font-size:13px;color:#1A1A1A;margin-bottom:12px;border:1px solid #EBEBEB;
-                    box-shadow:0 1px 3px rgba(0,0,0,0.04);">
-        {insight.replace(chr(10), "<br>")}
-        </div>
-        """, unsafe_allow_html=True)
+    # (기간 종합 인사이트는 각 차트 아래로 이동됨)
 
 
 # ════════════════════════════════════════════════════════════════
