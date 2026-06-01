@@ -172,6 +172,16 @@ def chart_container(title, subtitle=""):
     if subtitle:
         st.markdown(f'<div class="section-sub">{subtitle}</div>', unsafe_allow_html=True)
 
+def insight_box(lines, color=None):
+    bc = color or "#4F8EF7"
+    body = "".join(f'<div style="margin-bottom:6px;">{l}</div>' for l in lines)
+    st.markdown(f"""
+    <div style="background:#FAFAFA;border-left:4px solid {bc};padding:13px 18px;
+                border-radius:8px;font-size:13px;color:#1A1A1A;margin:8px 0 20px;
+                border:1px solid #EBEBEB;">
+    {body}
+    </div>""", unsafe_allow_html=True)
+
 
 
 
@@ -590,6 +600,26 @@ with tab1:
     with c5: kpi_card("평균 CPO", f"{avg_cpo:,}원" if avg_cpo else "—", f"전환일 {len(conv_days)}일")
     with c6: kpi_card("신규방문 비율", f"{avg_new_rate}%", f"재방문 {100-avg_new_rate}%")
 
+    # KPI 인사이트
+    _kpi_lines = []
+    if len(df) >= 7:
+        _r7  = df.tail(7); _p7 = df.iloc[-14:-7] if len(df) >= 14 else df.head(7)
+        _v_r = int(_r7["방문자"].sum()); _v_p = int(_p7["방문자"].sum())
+        _s_r = int(_r7["광고비"].sum()); _s_p = int(_p7["광고비"].sum())
+        _c_r = int(_r7["구매"].sum());   _c_p = int(_p7["구매"].sum())
+        _vd = round((_v_r-_v_p)/_v_p*100) if _v_p>0 else 0
+        _sd = round((_s_r-_s_p)/_s_p*100) if _s_p>0 else 0
+        _cd = _c_r - _c_p
+        _arrow = lambda x: ("▲" if x>0 else "▼") + f"{abs(x)}%"
+        _kpi_lines.append(f"📊 지난 7일 vs 이전 7일 — 방문자 {_arrow(_vd)} ({_v_r:,}명) · 광고비 {_arrow(_sd)} ({_s_r:,}원) · 전환 {_c_r}건({'▲' if _cd>0 else '▼'}{abs(_cd)}건)")
+    _roas_v = overall_roas
+    _new_pct = avg_new_rate
+    if total_purchases > 0:
+        _kpi_lines.append(f"💰 ROAS {_roas_v}배 {'— 손익분기 달성. 예산 증액 검토 가능.' if _roas_v>=3 else '— 손익분기(3배) 미달. 소재·타겟 최적화 선행 필요.'}")
+    _kpi_lines.append(f"👥 신규 {_new_pct}% · 재방문 {100-_new_pct}% — {'신규 비중이 높아 재방문 유도 전략(리타게팅·쿠폰) 병행 필요.' if _new_pct>85 else '재방문 비중 확보 중. 전환 타이밍 집중 공략 가능.'}")
+    if _kpi_lines:
+        insight_box(_kpi_lines, "#4F8EF7")
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     # 차트 1: 일별 방문자 & 전환 추이
@@ -634,23 +664,63 @@ with tab1:
     fig1.update_layout(yaxis2=dict(overlaying="y", visible=False))
     st.plotly_chart(fig1, use_container_width=True)
 
+    # 방문자/전환 추이 인사이트
+    _vis_lines = []
+    _ad_days_cnt = len(df[df["광고비"]>0])
+    _conv_days_cnt = len(df[df["구매"]>0])
+    if total_spend > 0:
+        _spend_per_day = round(total_spend / max(_ad_days_cnt,1))
+        _vis_lines.append(f"💸 광고 집행일 {_ad_days_cnt}일 · 일평균 {_spend_per_day:,}원 집행 → 전환 발생일 {_conv_days_cnt}일 ({round(_conv_days_cnt/max(_ad_days_cnt,1)*100)}%)")
+        if _conv_days_cnt == 0 and total_spend > 0:
+            _vis_lines.append(f"⚠️ 광고비 {total_spend:,}원 집행했으나 전환 0건 — 소재 교체 또는 랜딩 페이지 점검 필요. 클릭 후 이탈 구간(상품페이지→장바구니→결제) 확인 권장.")
+        elif total_purchases > 0:
+            _cpo = round(total_spend/total_purchases)
+            _vis_lines.append(f"🎯 CPO {_cpo:,}원 · 전환율 {round(total_purchases/max(total_visitors,1)*100,2)}% — {'효율 양호. 전환 집중 소재 예산 증액 검토.' if _cpo<50000 else 'CPO 높음. 타겟 범위 좁히거나 리타게팅 비중 확대 필요.'}")
+    elif total_visitors > 0:
+        _vis_lines.append(f"📌 광고 미집행 기간 — 방문자 {total_visitors:,}명 오가닉 유입. 콘텐츠/SNS 자연 유입 중.")
+    if _vis_lines:
+        insight_box(_vis_lines, "#4ECBA0")
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     # 차트 2+3: 광고 효율 & 채널 유입
     col_left, col_right = st.columns([3, 2])
 
     with col_left:
-        chart_container("광고 효율 추이", "CPO는 낮을수록, ROAS는 높을수록 좋음")
+        chart_container("광고 효율 추이", "광고비·CTR 항상 표시 / CPO·ROAS는 전환 발생 시")
         ad_df = df[df["광고비"] > 0].copy()
         if not ad_df.empty:
             fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+            # 광고비 막대 (항상)
             fig2.add_trace(go.Bar(
-                x=ad_df["날짜"], y=ad_df["CPO"],
-                name="CPO (원)",
-                marker_color=COLOR["orange"],
-                opacity=0.8,
-                hovertemplate="<b>%{x}</b><br>CPO: %{y:,}원<extra></extra>",
+                x=ad_df["날짜"], y=ad_df["광고비"],
+                name="광고비 (원)",
+                marker_color=COLOR["blue"], opacity=0.5,
+                hovertemplate="<b>%{x}</b><br>광고비: %{y:,}원<extra></extra>",
             ), secondary_y=False)
+            # CTR 라인 (항상)
+            ctr_df = ad_df[ad_df["CTR"] > 0]
+            if not ctr_df.empty:
+                fig2.add_trace(go.Scatter(
+                    x=ctr_df["날짜"], y=ctr_df["CTR"],
+                    name="CTR (%)",
+                    mode="lines+markers",
+                    line=dict(color=COLOR["orange"], width=2),
+                    marker=dict(size=6, color=COLOR["orange"]),
+                    hovertemplate="<b>%{x}</b><br>CTR: %{y:.2f}%<extra></extra>",
+                ), secondary_y=True)
+            # CPO 라인 (전환 있을 때)
+            cpo_df = ad_df[ad_df["CPO"] > 0]
+            if not cpo_df.empty:
+                fig2.add_trace(go.Scatter(
+                    x=cpo_df["날짜"], y=cpo_df["CPO"],
+                    name="CPO (원)",
+                    mode="lines+markers",
+                    line=dict(color=COLOR["purple"], width=2, dash="dot"),
+                    marker=dict(size=6, color=COLOR["purple"]),
+                    hovertemplate="<b>%{x}</b><br>CPO: %{y:,}원<extra></extra>",
+                ), secondary_y=False)
+            # ROAS 라인 (전환 있을 때)
             roas_df = ad_df[ad_df["ROAS"] > 0]
             if not roas_df.empty:
                 fig2.add_trace(go.Scatter(
@@ -661,20 +731,30 @@ with tab1:
                     marker=dict(size=7, color=COLOR["green"]),
                     hovertemplate="<b>%{x}</b><br>ROAS: %{y:.1f}배<extra></extra>",
                 ), secondary_y=True)
-            if avg_cpo > 0:
-                fig2.add_hline(y=avg_cpo, line_dash="dot", line_color=COLOR["gray"],
-                               annotation_text=f"평균 CPO {avg_cpo:,}원",
-                               annotation_position="top left", secondary_y=False)
             fig2.update_layout(
                 height=300, margin=dict(l=0, r=0, t=10, b=0),
                 plot_bgcolor="white", paper_bgcolor="white",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                 xaxis=dict(showgrid=False, tickfont=dict(size=11)),
-                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="CPO (원)"),
-                yaxis2=dict(showgrid=False, tickfont=dict(size=11), title="ROAS (배)"),
+                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="광고비 (원)"),
+                yaxis2=dict(showgrid=False, tickfont=dict(size=11), title="CTR (%) / ROAS (배)"),
                 hovermode="x unified",
             )
             st.plotly_chart(fig2, use_container_width=True)
+            # 광고효율 인사이트
+            _ae_lines = []
+            _avg_ctr = ctr_df["CTR"].mean() if not ctr_df.empty else 0
+            _recent_ctr = ctr_df["CTR"].iloc[-3:].mean() if len(ctr_df)>=3 else _avg_ctr
+            if _avg_ctr > 0:
+                _ctr_trend = "📉 최근 CTR 하락 — 소재 피로 신호. 이미지/문구 교체 검토." if _recent_ctr < _avg_ctr*0.8 else ("📈 CTR 상승 중 — 현재 소재 반응 좋음. 예산 증액 고려." if _recent_ctr > _avg_ctr*1.2 else f"CTR 평균 {_avg_ctr:.2f}% 유지 중.")
+                _ae_lines.append(_ctr_trend)
+            if not roas_df.empty:
+                _avg_roas = roas_df["ROAS"].mean()
+                _ae_lines.append(f"💰 평균 ROAS {_avg_roas:.1f}배 — {'수익권 달성. 전환 소재 중심 예산 집중.' if _avg_roas>=3 else '손익분기 미달. 타겟·소재 최적화 후 스케일업.'}")
+            elif total_spend > 0:
+                _ae_lines.append("⚠️ 전환 발생 없음 — 클릭→구매 전환 병목 구간 점검 필요. 상품페이지 CTA·리뷰·배송비 노출 확인.")
+            if _ae_lines:
+                insight_box(_ae_lines, COLOR["orange"])
         else:
             st.info("광고 집행 데이터 없음")
 
