@@ -76,16 +76,30 @@ def parse_color_size_slash(option):
 # ── 날짜 포맷터 ─────────────────────────────────────────────────
 
 def fmt_date(val):
-    """일반 날짜 → YYYY-MM-DD (29CM, W컨셉, SSF용)"""
+    """일반 날짜 → YYYY-MM-DD"""
     if not val:
         return ""
-    s = str(val)
     if isinstance(val, datetime):
         return val.strftime("%Y-%m-%d")
+    s = str(val).strip()
     m = re.match(r'(\d{4}-\d{2}-\d{2})', s)
     if m:
         return m.group(1)
-    return s[:10]
+    # YYYYMMDD 형식
+    if re.match(r'\d{8}$', s[:8]):
+        try:
+            return datetime.strptime(s[:8], "%Y%m%d").strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return ""
+
+def find_col(header, *keywords):
+    """헤더 행에서 키워드가 포함된 컬럼 인덱스 반환 (없으면 None)"""
+    for kw in keywords:
+        for i, h in enumerate(header):
+            if h and kw in str(h).strip():
+                return i
+    return None
 
 def fmt_date_sivillage(val):
     """SI Village 날짜: '20260525061821' → '2026-05-25'"""
@@ -105,19 +119,31 @@ def parse_29cm(filepath):
     print(f"  📦 29CM 파싱: {os.path.basename(filepath)}")
     wb = openpyxl.load_workbook(filepath)
     ws_f = wb.active
+    all_rows = list(ws_f.iter_rows(values_only=True))
+    if not all_rows:
+        return []
+    header = all_rows[0]
+    # 헤더에서 주문일 컬럼 자동 탐지
+    i_date   = find_col(header, "주문일", "주문 일", "주문일시") or 28
+    i_prod   = find_col(header, "상품명") or 8
+    i_code   = find_col(header, "상품코드", "품목코드") or 7
+    i_opt    = find_col(header, "옵션", "옵션명") or 10
+    i_qty    = find_col(header, "수량") or 11
+    i_price  = find_col(header, "판매가", "상품금액", "단가") or 20
+    i_status = find_col(header, "주문상태", "처리상태") or 33
     rows = []
-    for i, row in enumerate(ws_f.iter_rows(values_only=True)):
+    for i, row in enumerate(all_rows):
         if i == 0: continue
-        if not row[8]: continue
-        color, size = parse_color_size_29cm(row[10])
-        qty    = int(row[11]) if row[11] else 1
-        price  = int(row[20]) if row[20] else 0
+        if not row[i_prod]: continue
+        color, size = parse_color_size_29cm(row[i_opt])
+        qty    = int(row[i_qty]) if row[i_qty] else 1
+        price  = int(row[i_price]) if row[i_price] else 0
         total  = price * qty
         profit = round(total * (1 - COMMISSION / 100))
-        status = str(row[33]) if row[33] else ""
+        status = str(row[i_status]) if row[i_status] else ""
         rows.append([
-            "29CM", fmt_date(row[28]),
-            str(row[8]), str(row[7]),
+            "29CM", fmt_date(row[i_date]),
+            str(row[i_prod]), str(row[i_code]),
             color, size, qty, total,
             COMMISSION, profit, status
         ])
@@ -145,6 +171,10 @@ def parse_wconcept(filepath):
     else:
         # 구버전 (31컬럼)
         i_name, i_color, i_size, i_qty, i_price, i_cancel, i_code, i_base = 11, 12, 13, 15, 18, 23, 29, 10
+    # 주문일 컬럼 자동 탐지 (없으면 index 1 사용 — W컨셉 첫번째 컬럼은 주문번호)
+    i_date_wc = find_col(header, "주문일", "주문일시", "결제일") 
+    if i_date_wc is None:
+        i_date_wc = 1
 
     rows = []
     for i, row in enumerate(all_rows):
@@ -164,8 +194,9 @@ def parse_wconcept(filepath):
         profit = round(total * (1 - COMMISSION / 100))
         status = "취소" if row[i_cancel] else "정상"
         code   = str(row[i_code]) if row[i_code] else str(row[i_base])
+        # 주문일: 헤더에서 자동 탐지 (파일마다 위치 다를 수 있음)
         rows.append([
-            "W컨셉", fmt_date(row[0]),
+            "W컨셉", fmt_date(row[i_date_wc]),
             str(row[i_name]), code,
             color, size, qty, total,
             COMMISSION, profit, status
@@ -176,6 +207,11 @@ def parse_ssf(filepath):
     print(f"  📦 SSF 파싱: {os.path.basename(filepath)}")
     wb = xlrd.open_workbook(filepath)
     ws_f = wb.sheet_by_index(0)
+    if ws_f.nrows < 2:
+        return []
+    # 헤더에서 주문일 컬럼 자동 탐지
+    header = ws_f.row_values(0)
+    i_date = next((i for i, h in enumerate(header) if h and "주문일" in str(h)), 0)
     rows = []
     for i in range(1, ws_f.nrows):
         row = ws_f.row_values(i)
@@ -188,7 +224,7 @@ def parse_ssf(filepath):
         profit = round(total * (1 - comm / 100))
         status = str(row[25]) if row[25] else ""
         rows.append([
-            "SSF", fmt_date(row[0]),
+            "SSF", fmt_date(row[i_date]),
             str(row[21]), str(row[20]),
             color, size, qty, total,
             comm, profit, status
