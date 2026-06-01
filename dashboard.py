@@ -11,15 +11,19 @@ import gspread
 from google.oauth2.service_account import Credentials as SACredentials
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from google.auth.transport.requests import Request
-import json, os
-import requests
-import time
-from datetime import date as _date, timedelta
-from google.analytics.data_v1beta import BetaAnalyticsDataClient
-from google.analytics.data_v1beta.types import (
-    RunReportRequest, Dimension, Metric, DateRange,
-    FilterExpression, Filter, FilterExpressionList
-)
+import json, os, time
+import requests as _requests
+
+# ── GA4 API imports (lazy-safe) ────────────────────────────────────
+try:
+    from google.analytics.data_v1beta import BetaAnalyticsDataClient
+    from google.analytics.data_v1beta.types import (
+        RunReportRequest, Dimension, Metric, DateRange,
+        FilterExpression, Filter, FilterExpressionList,
+    )
+    _GA4_AVAILABLE = True
+except ImportError:
+    _GA4_AVAILABLE = False
 
 # ── 설정 ───────────────────────────────────────────────────────────
 SPREADSHEET_ID      = "1y9mZirj81sR2tkkGV_wTzFvJonPdJU-JuErSRDo_73E"
@@ -172,171 +176,6 @@ def chart_container(title, subtitle=""):
     if subtitle:
         st.markdown(f'<div class="section-sub">{subtitle}</div>', unsafe_allow_html=True)
 
-def insight_box(lines, color=None):
-    bc = color or "#4F8EF7"
-    body = "".join(f'<div style="margin-bottom:6px;">{l}</div>' for l in lines)
-    st.markdown(f"""
-    <div style="background:#FAFAFA;border-left:4px solid {bc};padding:13px 18px;
-                border-radius:8px;font-size:13px;color:#1A1A1A;margin:8px 0 20px;
-                border:1px solid #EBEBEB;">
-    {body}
-    </div>""", unsafe_allow_html=True)
-
-
-
-
-# ── OAuth 크레덴셜 헬퍼 ─────────────────────────────────────────────
-def _get_oauth_creds():
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-        "https://www.googleapis.com/auth/analytics.readonly",
-    ]
-    token_json = None
-    try:
-        token_json = st.secrets["google_token_json"]
-    except Exception:
-        pass
-    if token_json:
-        token_info = json.loads(token_json) if isinstance(token_json, str) else dict(token_json)
-        creds = OAuthCredentials.from_authorized_user_info(token_info, scopes)
-    else:
-        creds = OAuthCredentials.from_authorized_user_file(TOKEN_FILE, scopes)
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    return creds
-
-GA4_PROPERTY_ID = "536368183"
-AD_ACCOUNT      = "act_1599099620677018"
-
-def update_ga4_yesterday():
-    try:
-        creds = _get_oauth_creds()
-        ga4_client = BetaAnalyticsDataClient(credentials=creds)
-        gc_o = gspread.authorize(creds)
-        ws_t = gc_o.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
-
-        yesterday = _date.today() - timedelta(days=1)
-        date_str  = yesterday.strftime("%Y-%m-%d")
-        day_label = f"{yesterday.month}/{yesterday.day}"
-
-        def run_report(dims, mets, filter_expr=None):
-            req = RunReportRequest(
-                property=f"properties/{GA4_PROPERTY_ID}",
-                dimensions=[Dimension(name=d) for d in dims],
-                metrics=[Metric(name=m) for m in mets],
-                date_ranges=[DateRange(start_date=date_str, end_date=date_str)],
-            )
-            if filter_expr:
-                req.dimension_filter = filter_expr
-            return ga4_client.run_report(req)
-
-        res = run_report(["date"], ["sessions","transactions","bounceRate","averagePurchaseRevenue","purchaseRevenue"])
-        sessions = transactions = bounce = avg_price = revenue = 0
-        if res.rows:
-            r = res.rows[0].metric_values
-            sessions     = int(float(r[0].value))
-            transactions = int(float(r[1].value))
-            bounce       = round(float(r[2].value) * 100, 1)
-            avg_price    = round(float(r[3].value))
-            revenue      = round(float(r[4].value))
-
-        def get_channel(source, medium):
-            f = FilterExpression(and_group=FilterExpressionList(expressions=[
-                FilterExpression(filter=Filter(field_name="sessionSource",
-                    string_filter=Filter.StringFilter(value=source, match_type="EXACT"))),
-                FilterExpression(filter=Filter(field_name="sessionMedium",
-                    string_filter=Filter.StringFilter(value=medium, match_type="EXACT")))
-            ]))
-            r = run_report(["sessionSource"], ["sessions"], f)
-            return int(float(r.rows[0].metric_values[0].value)) if r.rows else 0
-
-        time.sleep(0.3); ch_meta     = get_channel("meta","paid_feed") + get_channel("ig","paid")
-        time.sleep(0.3); ch_official = get_channel("instagram","bio")
-        time.sleep(0.3); ch_personal = get_channel("instagram","personal_bio") + get_channel("instagram","personal_story")
-        time.sleep(0.3)
-        f_direct = FilterExpression(filter=Filter(field_name="sessionMedium",
-            string_filter=Filter.StringFilter(value="(none)", match_type="EXACT")))
-        r_direct = run_report(["sessionMedium"], ["sessions"], f_direct)
-        ch_direct = int(float(r_direct.rows[0].metric_values[0].value)) if r_direct.rows else 0
-
-        res_new = run_report(["newVsReturning"], ["activeUsers"])
-        new_users = returning_users = 0
-        for row in res_new.rows:
-            val = int(float(row.metric_values[0].value))
-            if row.dimension_values[0].value == "new":
-                new_users = val
-            else:
-                returning_users = val
-
-        all_dates = ws_t.col_values(1)
-        row_idx = next((i+1 for i, d in enumerate(all_dates) if d == day_label), None)
-        if not row_idx:
-            return False, f"❌ GA4: 시트에 {day_label} 날짜 행 없음"
-
-        ws_t.update(values=[[sessions, transactions]], range_name=f"K{row_idx}:L{row_idx}")
-        time.sleep(0.2)
-        ws_t.update(values=[[bounce, avg_price, revenue, ch_meta, ch_official, ch_personal, ch_direct]],
-                    range_name=f"N{row_idx}:T{row_idx}")
-        time.sleep(0.2)
-        ws_t.update(values=[[new_users, returning_users]], range_name=f"U{row_idx}:V{row_idx}")
-        return True, f"✅ GA4 {day_label} 업데이트 완료 (방문 {sessions}명, 전환 {transactions}건)"
-    except Exception as e:
-        return False, f"❌ GA4 업데이트 실패: {e}"
-
-def update_meta_yesterday():
-    try:
-        meta_token = None
-        for key in ("meta_access_token", "META_ACCESS_TOKEN", "meta_token"):
-            try:
-                meta_token = st.secrets[key]
-                if meta_token: break
-            except Exception:
-                pass
-        if not meta_token:
-            _tf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta_token.txt")
-            if os.path.exists(_tf):
-                meta_token = open(_tf).read().strip()
-        if not meta_token:
-            return False, "❌ Meta 토큰 없음. Streamlit secrets에 meta_access_token을 추가해 주세요."
-
-        yesterday = _date.today() - timedelta(days=1)
-        date_str  = yesterday.strftime("%Y-%m-%d")
-        day_label = f"{yesterday.month}/{yesterday.day}"
-
-        res = requests.get(
-            f"https://graph.facebook.com/v25.0/{AD_ACCOUNT}/insights",
-            params={
-                "fields": "spend,impressions,clicks,ctr,cpc,actions,purchase_roas",
-                "time_range": f'{{"since":"{date_str}","until":"{date_str}"}}',
-                "access_token": meta_token
-            }
-        ).json()
-
-        spend = impressions = clicks = purchases = 0
-        if res.get("data"):
-            d = res["data"][0]
-            spend       = round(float(d.get("spend", 0)))
-            impressions = int(d.get("impressions", 0))
-            clicks      = int(d.get("clicks", 0))
-            for action in d.get("actions", []):
-                if action["action_type"] in ("purchase","offsite_conversion.fb_pixel_purchase"):
-                    purchases = int(float(action["value"]))
-
-        creds = _get_oauth_creds()
-        gc_o  = gspread.authorize(creds)
-        ws_t  = gc_o.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
-        all_dates = ws_t.col_values(1)
-        row_idx = next((i+1 for i, d in enumerate(all_dates) if d == day_label), None)
-        if not row_idx:
-            return False, f"❌ Meta: 시트에 {day_label} 날짜 행 없음"
-
-        ws_t.update(values=[[spend, impressions, clicks]], range_name=f"C{row_idx}:E{row_idx}")
-        time.sleep(0.2)
-        ws_t.update(values=[[purchases]], range_name=f"H{row_idx}")
-        return True, f"✅ Meta {day_label} 업데이트 완료 (광고비 {spend:,}원, 전환 {purchases}건)"
-    except Exception as e:
-        return False, f"❌ Meta 업데이트 실패: {e}"
 
 # ── 데이터 로드: 방문자/광고 ────────────────────────────────────────
 @st.cache_data(ttl=300)
@@ -502,6 +341,207 @@ def load_platform_data():
 
 
 # ══════════════════════════════════════════════════════════════════
+# 자동 업데이트 함수 (새로고침 버튼에서 호출)
+# ══════════════════════════════════════════════════════════════════
+
+def _get_sheet_creds(extra_scopes=None):
+    """SA(시크릿) 또는 OAuth(로컬 token.json) 인증 반환 — Sheets 전용"""
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"] + (extra_scopes or [])
+    if "gcp_service_account" in st.secrets:
+        return SACredentials.from_service_account_info(
+            dict(st.secrets["gcp_service_account"]), scopes=scopes
+        )
+    token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
+    creds = OAuthCredentials.from_authorized_user_file(token_path, scopes)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    return creds
+
+
+def _get_oauth_creds():
+    """OAuth 자격증명 반환 — GA4 + Sheets 동시 접근용.
+    Streamlit secrets의 google_token_json 또는 로컬 token.json 사용."""
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/analytics.readonly",
+    ]
+    token_json = None
+    try:
+        token_json = st.secrets["google_token_json"]
+    except Exception:
+        pass
+    if token_json:
+        token_info = json.loads(token_json) if isinstance(token_json, str) else dict(token_json)
+        creds = OAuthCredentials.from_authorized_user_info(token_info, scopes)
+    else:
+        token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
+        creds = OAuthCredentials.from_authorized_user_file(token_path, scopes)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    return creds
+
+
+def update_ga4_yesterday():
+    """어제 GA4 데이터를 시트 K~V열에 업데이트. (bool, str) 반환."""
+    if not _GA4_AVAILABLE:
+        return False, "google-analytics-data 패키지가 설치되어 있지 않아요."
+    try:
+        from datetime import date, timedelta
+
+        GA4_PROPERTY_ID = "536368183"
+        creds           = _get_oauth_creds()   # OAuth: Sheets + GA4 동시 접근
+        ga4             = BetaAnalyticsDataClient(credentials=creds)
+        gc              = gspread.authorize(creds)
+        ws              = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+        yesterday = date.today() - timedelta(days=1)
+        date_str  = yesterday.strftime("%Y-%m-%d")
+        day_label = f"{yesterday.month}/{yesterday.day}"
+
+        def run_report(dimensions, metrics, filter_expr=None):
+            req = RunReportRequest(
+                property=f"properties/{GA4_PROPERTY_ID}",
+                dimensions=[Dimension(name=d) for d in dimensions],
+                metrics=[Metric(name=m) for m in metrics],
+                date_ranges=[DateRange(start_date=date_str, end_date=date_str)],
+            )
+            if filter_expr:
+                req.dimension_filter = filter_expr
+            return ga4.run_report(req)
+
+        # 전체 지표
+        res = run_report(
+            ["date"],
+            ["sessions", "transactions", "bounceRate", "averagePurchaseRevenue", "purchaseRevenue"],
+        )
+        sessions = transactions = bounce = avg_price = revenue = 0
+        if res.rows:
+            r            = res.rows[0].metric_values
+            sessions     = int(float(r[0].value))
+            transactions = int(float(r[1].value))
+            bounce       = round(float(r[2].value) * 100, 1)
+            avg_price    = round(float(r[3].value))
+            revenue      = round(float(r[4].value))
+
+        def get_channel(source, medium):
+            f = FilterExpression(and_group=FilterExpressionList(expressions=[
+                FilterExpression(filter=Filter(field_name="sessionSource",
+                    string_filter=Filter.StringFilter(value=source, match_type="EXACT"))),
+                FilterExpression(filter=Filter(field_name="sessionMedium",
+                    string_filter=Filter.StringFilter(value=medium, match_type="EXACT"))),
+            ]))
+            r2 = run_report(["sessionSource"], ["sessions"], f)
+            return int(float(r2.rows[0].metric_values[0].value)) if r2.rows else 0
+
+        time.sleep(0.3)
+        ch_meta     = get_channel("meta", "paid_feed") + get_channel("ig", "paid")
+        time.sleep(0.3)
+        ch_official = get_channel("instagram", "bio")
+        time.sleep(0.3)
+        ch_personal = get_channel("instagram", "personal_bio") + get_channel("instagram", "personal_story")
+        time.sleep(0.3)
+
+        f_direct  = FilterExpression(filter=Filter(field_name="sessionMedium",
+            string_filter=Filter.StringFilter(value="(none)", match_type="EXACT")))
+        r_direct  = run_report(["sessionMedium"], ["sessions"], f_direct)
+        ch_direct = int(float(r_direct.rows[0].metric_values[0].value)) if r_direct.rows else 0
+
+        res_new        = run_report(["newVsReturning"], ["activeUsers"])
+        new_users = returning_users = 0
+        for row in res_new.rows:
+            val = int(float(row.metric_values[0].value))
+            if row.dimension_values[0].value == "new":
+                new_users = val
+            else:
+                returning_users = val
+
+        all_dates = ws.col_values(1)
+        row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
+        if not row_idx:
+            return False, f"'{day_label}' 날짜를 시트에서 찾을 수 없어요. 시트에 해당 날짜 행을 추가해 주세요."
+
+        ws.update(values=[[sessions, transactions]], range_name=f"K{row_idx}:L{row_idx}")
+        time.sleep(0.2)
+        ws.update(
+            values=[[bounce, avg_price, revenue, ch_meta, ch_official, ch_personal, ch_direct]],
+            range_name=f"N{row_idx}:T{row_idx}",
+        )
+        time.sleep(0.2)
+        ws.update(values=[[new_users, returning_users]], range_name=f"U{row_idx}:V{row_idx}")
+
+        return True, f"✅ GA4 {day_label} 완료 — 방문자 {sessions:,}명 · 구매 {transactions}건"
+
+    except Exception as e:
+        return False, f"❌ GA4 업데이트 실패: {e}"
+
+
+def update_meta_yesterday():
+    """어제 메타 광고 데이터를 시트 C~H열에 업데이트. (bool, str) 반환."""
+    try:
+        from datetime import date, timedelta
+
+        # Meta 토큰 우선순위: secrets → 로컬 파일
+        meta_token = None
+        for key in ("meta_access_token", "META_ACCESS_TOKEN", "meta_token"):
+            try:
+                meta_token = st.secrets[key]
+                if meta_token:
+                    break
+            except Exception:
+                pass
+        if not meta_token:
+            _tf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta_token.txt")
+            if os.path.exists(_tf):
+                meta_token = open(_tf).read().strip()
+        if not meta_token:
+            return False, "❌ Meta 토큰 없음. Streamlit secrets에 meta_access_token을 추가해 주세요."
+
+        AD_ACCOUNT = "act_1599099620677018"
+
+        creds = _get_sheet_creds()
+        gc    = gspread.authorize(creds)
+        ws    = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+        yesterday = date.today() - timedelta(days=1)
+        date_str  = yesterday.strftime("%Y-%m-%d")
+        day_label = f"{yesterday.month}/{yesterday.day}"
+
+        res = _requests.get(
+            f"https://graph.facebook.com/v25.0/{AD_ACCOUNT}/insights",
+            params={
+                "fields":     "spend,impressions,clicks,ctr,cpc,actions,purchase_roas",
+                "time_range": f'{{"since":"{date_str}","until":"{date_str}"}}',
+                "access_token": meta_token,
+            },
+            timeout=15,
+        ).json()
+
+        spend = impressions = clicks = purchases = 0
+        if res.get("data"):
+            d           = res["data"][0]
+            spend       = round(float(d.get("spend", 0)))
+            impressions = int(d.get("impressions", 0))
+            clicks      = int(d.get("clicks", 0))
+            for action in d.get("actions", []):
+                if action["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
+                    purchases = int(float(action["value"]))
+
+        all_dates = ws.col_values(1)
+        row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
+        if not row_idx:
+            return False, f"'{day_label}' 날짜를 시트에서 찾을 수 없어요."
+
+        ws.update(values=[[spend, impressions, clicks]], range_name=f"C{row_idx}:E{row_idx}")
+        time.sleep(0.2)
+        ws.update(values=[[purchases]], range_name=f"H{row_idx}")
+
+        return True, f"✅ Meta {day_label} 완료 — 광고비 {spend:,}원 · 전환 {purchases}건"
+
+    except Exception as e:
+        return False, f"❌ Meta 업데이트 실패: {e}"
+
+
+# ══════════════════════════════════════════════════════════════════
 # 메인
 # ══════════════════════════════════════════════════════════════════
 df_all          = load_data()
@@ -568,6 +608,17 @@ with tab1:
 
     st.markdown("---")
 
+    # ── 인사이트 박스 헬퍼 ────────────────────────────────────────
+    def insight_box(lines, color=None):
+        bc = color or COLOR["blue"]
+        body = "".join(f'<div style="margin-bottom:5px;">{l}</div>' for l in lines)
+        st.markdown(f"""
+        <div style="background:#FAFAFA;border-left:4px solid {bc};padding:13px 18px;
+                    border-radius:8px;font-size:13px;color:#1A1A1A;margin:8px 0 20px;
+                    border:1px solid #EBEBEB;">
+        {body}
+        </div>""", unsafe_allow_html=True)
+
     # KPI 카드
     ad_days   = df[df["광고비"] > 0]
     conv_days = df[df["구매"] > 0]
@@ -600,43 +651,25 @@ with tab1:
     with c5: kpi_card("평균 CPO", f"{avg_cpo:,}원" if avg_cpo else "—", f"전환일 {len(conv_days)}일")
     with c6: kpi_card("신규방문 비율", f"{avg_new_rate}%", f"재방문 {100-avg_new_rate}%")
 
-    # KPI 인사이트
+    # ── KPI 인사이트 ──────────────────────────────────────────────
     _kpi_lines = []
-    if len(df) >= 7:
-        _r7  = df.tail(7); _p7 = df.iloc[-14:-7] if len(df) >= 14 else df.head(max(1,len(df)-7))
-        _v_r = int(_r7["방문자"].sum()); _v_p = int(_p7["방문자"].sum())
-        _s_r = int(_r7["광고비"].sum()); _s_p = int(_p7["광고비"].sum())
-        _c_r = int(_r7["구매"].sum());   _c_p = int(_p7["구매"].sum())
-        _rev_r = _r7["매출"].sum(); _rev_p = _p7["매출"].sum()
-        _vd = round((_v_r-_v_p)/_v_p*100) if _v_p>0 else 0
-        _sd = round((_s_r-_s_p)/_s_p*100) if _s_p>0 else 0
-        _cd = _c_r - _c_p
-        _arrow = lambda x: ("▲" if x>0 else "▼") + f"{abs(x)}%"
-        _vis_comment = (
-            f"방문자가 {abs(_vd)}% 증가했는데 전환이 {'함께 늘었어요' if _cd>0 else '늘지 않았다면 랜딩 경험이나 상품 설득력 점검이 필요해요'}." if _vd>0 else
-            f"방문자가 {abs(_vd)}% 감소했어요. {'광고비도 줄었다면 예산 축소 영향이며,' if _sd<0 else '광고비는 유지됐으므로 소재 반응이 떨어진 것으로'} 새 소재 테스트가 필요해요." if _vd<0 else
-            "방문자 수 큰 변동 없이 안정적이에요."
-        )
-        _kpi_lines.append(f"📊 지난 7일 vs 이전 7일 — 방문자 {_arrow(_vd)} ({_v_r:,}명) · 광고비 {_arrow(_sd)} ({_s_r:,}원) · 전환 {_c_r}건({'▲' if _cd>0 else ('▼' if _cd<0 else '±')}{abs(_cd)}건). {_vis_comment}")
-    # ROAS: 전체 매출/전체 광고비로 정확 계산
-    _roas_v = overall_roas
-    _new_pct = avg_new_rate
-    _ret_pct = 100 - _new_pct
-    if total_purchases > 0 and total_spend > 0:
-        if _roas_v >= 3:
-            _kpi_lines.append(f"💰 ROAS {_roas_v}배 — 광고비 대비 수익이 나는 구간이에요. 단, 플랫폼 수수료(약 30%)와 원가를 고려한 실수익률도 함께 체크하세요. 현재 소재·타겟 조합을 유지하면서 일예산 10~20% 증액 테스트를 권장해요.")
-        elif _roas_v >= 2:
-            _kpi_lines.append(f"💰 ROAS {_roas_v}배 — 손익분기(3배)에 근접했지만 아직 미달이에요. 클릭 후 구매까지 이어지지 않는 구간(장바구니 이탈, 결제 직전 이탈)을 GA4 퍼널로 확인하고, 이탈 시점에 맞는 리타게팅 메시지를 추가하면 전환율을 높일 수 있어요.")
-        else:
-            _kpi_lines.append(f"💰 ROAS {_roas_v}배 — 광고비 대비 매출 회수가 낮아요. 타겟 오디언스가 실제 구매층과 일치하는지 점검하고, 현재 소재를 구매 전환에 특화된 메시지(한정 수량·할인 종료 임박)로 교체해보세요.")
-    if _new_pct > 85:
-        _kpi_lines.append(f"👥 신규 {_new_pct}% · 재방문 {_ret_pct}% — 신규 방문 비중이 압도적으로 높아요. 이는 브랜드 인지가 아직 쌓이지 않았다는 의미로, 재방문율을 높이려면 팔로우 유도 콘텐츠, 첫 구매 쿠폰, 카카오채널 추가 등 락인 장치가 필요해요.")
-    elif _ret_pct >= 20:
-        _kpi_lines.append(f"👥 신규 {_new_pct}% · 재방문 {_ret_pct}% — 재방문 비중이 {_ret_pct}%로 양호해요. 재방문자는 구매 의향이 높은 잠재 고객이에요. 이 그룹에게 '한정 재고', '오늘만 혜택' 메시지로 전환을 유도하면 CPO를 크게 낮출 수 있어요.")
-    else:
-        _kpi_lines.append(f"👥 신규 {_new_pct}% · 재방문 {_ret_pct}% — 재방문자가 적어 브랜드 충성도 형성이 초기 단계예요. 인스타그램 스토리 리타게팅과 메타 맞춤 타겟(웹사이트 방문자)을 활용하면 재방문율을 끌어올릴 수 있어요.")
-    if _kpi_lines:
-        insight_box(_kpi_lines, "#4F8EF7")
+    if len(prior) > 0 and prior["방문자"].sum() > 0:
+        _v  = round((recent["방문자"].sum() - prior["방문자"].sum()) / prior["방문자"].sum() * 100)
+        _sp = round((recent["광고비"].sum()  - prior["광고비"].sum())  / prior["광고비"].sum()  * 100) if prior["광고비"].sum() > 0 else None
+        _c  = int(recent["구매"].sum() - prior["구매"].sum())
+        _vc = f"<b style='color:{'#27AE60' if _v>=0 else '#E74C3C'}'>{'▲' if _v>=0 else '▼'}{abs(_v)}%</b>"
+        _sc = (f"<b style='color:{'#E74C3C' if _sp>=0 else '#27AE60'}'>{'▲' if _sp>=0 else '▼'}{abs(_sp)}%</b>") if _sp is not None else "—"
+        _cc = f"<b style='color:{'#27AE60' if _c>=0 else '#E74C3C'}'>{'▲' if _c>=0 else '▼'}{abs(_c)}건</b>"
+        _kpi_lines.append(f"📊 <b>지난 7일 vs 이전 7일</b> — 방문자 {_vc} · 광고비 {_sc} · 전환 {_cc}")
+    _nr_msg = "신규 비중이 높아 재방문 리타게팅 여지 큼." if avg_new_rate >= 70 else "재방문 비중이 올라오고 있음 — 구매 결정 장벽(가격·배송비·리뷰) 점검 권장."
+    _kpi_lines.append(f"👥 신규 <b>{avg_new_rate}%</b> / 재방문 <b>{100-avg_new_rate}%</b> — {_nr_msg}")
+    if total_spend > 0:
+        _rc = "#27AE60" if overall_roas >= 3 else ("#F39C12" if overall_roas >= 1.5 else "#E74C3C")
+        _rm = ("목표 ROAS 달성 — 예산 증액 검토 가능." if overall_roas >= 3
+               else "손익분기 근접 — 소재·타겟 최적화 후 증액 판단." if overall_roas >= 1.5
+               else "ROAS 1.5 미달 — 현 세팅으로 증액 시 손실. 타겟·소재 전면 점검 필요.")
+        _kpi_lines.append(f"💰 ROAS <b style='color:{_rc}'>{overall_roas}배</b> — {_rm}")
+    insight_box(_kpi_lines, COLOR["blue"])
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -682,22 +715,30 @@ with tab1:
     fig1.update_layout(yaxis2=dict(overlaying="y", visible=False))
     st.plotly_chart(fig1, use_container_width=True)
 
-    # 방문자/전환 추이 인사이트
-    _vis_lines = []
-    _ad_days_cnt = len(df[df["광고비"]>0])
-    _conv_days_cnt = len(df[df["구매"]>0])
-    if total_spend > 0:
-        _spend_per_day = round(total_spend / max(_ad_days_cnt,1))
-        _vis_lines.append(f"💸 광고 집행일 {_ad_days_cnt}일 · 일평균 {_spend_per_day:,}원 집행 → 전환 발생일 {_conv_days_cnt}일 ({round(_conv_days_cnt/max(_ad_days_cnt,1)*100)}%)")
-        if _conv_days_cnt == 0 and total_spend > 0:
-            _vis_lines.append(f"⚠️ 광고비 {total_spend:,}원 집행했으나 전환 0건 — 소재 교체 또는 랜딩 페이지 점검 필요. 클릭 후 이탈 구간(상품페이지→장바구니→결제) 확인 권장.")
-        elif total_purchases > 0:
-            _cpo = round(total_spend/total_purchases)
-            _vis_lines.append(f"🎯 CPO {_cpo:,}원 · 전환율 {round(total_purchases/max(total_visitors,1)*100,2)}% — {'효율 양호. 전환 집중 소재 예산 증액 검토.' if _cpo<50000 else 'CPO 높음. 타겟 범위 좁히거나 리타게팅 비중 확대 필요.'}")
-    elif total_visitors > 0:
-        _vis_lines.append(f"📌 광고 미집행 기간 — 방문자 {total_visitors:,}명 오가닉 유입. 콘텐츠/SNS 자연 유입 중.")
-    if _vis_lines:
-        insight_box(_vis_lines, "#4ECBA0")
+    # ── 방문자·전환 추이 인사이트 ─────────────────────────────────
+    _t1_lines = []
+    if len(df) > 1:
+        _max_day = df.loc[df["방문자"].idxmax()]
+        _avg_vis = df["방문자"].mean()
+        if _max_day["방문자"] > _avg_vis * 2:
+            _top_ch = max({"메타광고": _max_day["유입_메타"], "공식인스타": _max_day["유입_공식"],
+                           "개인인스타": _max_day["유입_개인"], "직접방문": _max_day["유입_직접"]}, key=lambda k: {"메타광고": _max_day["유입_메타"], "공식인스타": _max_day["유입_공식"], "개인인스타": _max_day["유입_개인"], "직접방문": _max_day["유입_직접"]}[k])
+            _t1_lines.append(f"📈 <b>{_max_day['날짜']} 트래픽 스파이크</b> — 평균 대비 {round(_max_day['방문자']/_avg_vis,1)}배 급등, 주요 유입: {_top_ch}.")
+    if total_purchases == 0 and total_spend > 0:
+        _avg_b = df["이탈율"].replace(0, float("nan")).mean()
+        if _avg_b and _avg_b >= 60:
+            _t1_lines.append(f"⚠️ <b>전환 0건</b> — 광고비 {total_spend:,}원 집행했으나 이탈율 평균 {_avg_b:.0f}%로 높음. <b>액션플랜:</b> 소재 이미지와 상품페이지 메시지 일관성 점검, 랜딩 상품 직링크로 교체.")
+        else:
+            _t1_lines.append(f"⚠️ <b>전환 0건</b> — 클릭은 유입되나 결제 미전환. <b>액션플랜:</b> 결제 페이지 내 배송비 노출 시점·리뷰 수·CTA 버튼 위치 점검 필요.")
+    elif total_purchases > 0:
+        _conv_rate_ok = overall_cvr >= 1.0
+        _cr_color = "#27AE60" if _conv_rate_ok else "#F39C12"
+        _t1_lines.append(f"🛍 전환율 <b style='color:{_cr_color}'>{overall_cvr}%</b> — {'양호. 트래픽 증가 시 전환 비례 상승 기대.' if _conv_rate_ok else '전환율 1% 미달. 방문자 대비 구매가 적음 — 상품 상세 페이지 설득력 강화 필요.'}")
+    if total_spend > 0 and len(ad_days) > 0:
+        _spend_trend = "증가" if ad_days["광고비"].iloc[-1] > ad_days["광고비"].mean() else "감소"
+        _t1_lines.append(f"💸 최근 광고비 {_spend_trend} 추세 — {'전환율 개선 없이 증액은 CPO 악화로 이어짐. 소재 교체 후 증액 순서 권장.' if _spend_trend == '증가' and total_purchases == 0 else '광고비와 전환이 함께 움직이는지 추이를 지속 모니터링.'}")
+    if _t1_lines:
+        insight_box(_t1_lines, COLOR["orange"])
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -709,14 +750,15 @@ with tab1:
         ad_df = df[df["광고비"] > 0].copy()
         if not ad_df.empty:
             fig2 = make_subplots(specs=[[{"secondary_y": True}]])
-            # 광고비 막대 (항상)
+            # 광고비 막대 (항상 표시)
             fig2.add_trace(go.Bar(
                 x=ad_df["날짜"], y=ad_df["광고비"],
                 name="광고비 (원)",
-                marker_color=COLOR["blue"], opacity=0.5,
+                marker_color=COLOR["blue"],
+                opacity=0.5,
                 hovertemplate="<b>%{x}</b><br>광고비: %{y:,}원<extra></extra>",
             ), secondary_y=False)
-            # CTR 라인 (항상)
+            # CTR 라인 (항상 표시)
             ctr_df = ad_df[ad_df["CTR"] > 0]
             if not ctr_df.empty:
                 fig2.add_trace(go.Scatter(
@@ -727,7 +769,7 @@ with tab1:
                     marker=dict(size=6, color=COLOR["orange"]),
                     hovertemplate="<b>%{x}</b><br>CTR: %{y:.2f}%<extra></extra>",
                 ), secondary_y=True)
-            # CPO 라인 (전환 있을 때)
+            # CPO 라인 (전환 있을 때만)
             cpo_df = ad_df[ad_df["CPO"] > 0]
             if not cpo_df.empty:
                 fig2.add_trace(go.Scatter(
@@ -738,7 +780,7 @@ with tab1:
                     marker=dict(size=6, color=COLOR["purple"]),
                     hovertemplate="<b>%{x}</b><br>CPO: %{y:,}원<extra></extra>",
                 ), secondary_y=False)
-            # ROAS 라인 (전환 있을 때)
+            # ROAS 라인 (전환 있을 때만)
             roas_df = ad_df[ad_df["ROAS"] > 0]
             if not roas_df.empty:
                 fig2.add_trace(go.Scatter(
@@ -754,25 +796,35 @@ with tab1:
                 plot_bgcolor="white", paper_bgcolor="white",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                 xaxis=dict(showgrid=False, tickfont=dict(size=11)),
-                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="광고비 (원)"),
-                yaxis2=dict(showgrid=False, tickfont=dict(size=11), title="CTR (%) / ROAS (배)"),
+                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), tickformat=","),
+                yaxis2=dict(showgrid=False, tickfont=dict(size=11)),
                 hovermode="x unified",
             )
             st.plotly_chart(fig2, use_container_width=True)
-            # 광고효율 인사이트
+            # ── 광고 효율 인사이트 ────────────────────────────────
             _ae_lines = []
-            _avg_ctr = ctr_df["CTR"].mean() if not ctr_df.empty else 0
-            _recent_ctr = ctr_df["CTR"].iloc[-3:].mean() if len(ctr_df)>=3 else _avg_ctr
-            if _avg_ctr > 0:
-                _ctr_trend = "📉 최근 CTR 하락 — 소재 피로 신호. 이미지/문구 교체 검토." if _recent_ctr < _avg_ctr*0.8 else ("📈 CTR 상승 중 — 현재 소재 반응 좋음. 예산 증액 고려." if _recent_ctr > _avg_ctr*1.2 else f"CTR 평균 {_avg_ctr:.2f}% 유지 중.")
-                _ae_lines.append(_ctr_trend)
-            if not roas_df.empty:
-                _avg_roas = roas_df["ROAS"].mean()
-                _ae_lines.append(f"💰 평균 ROAS {_avg_roas:.1f}배 — {'수익권 달성. 전환 소재 중심 예산 집중.' if _avg_roas>=3 else '손익분기 미달. 타겟·소재 최적화 후 스케일업.'}")
-            elif total_spend > 0:
-                _ae_lines.append("⚠️ 전환 발생 없음 — 클릭→구매 전환 병목 구간 점검 필요. 상품페이지 CTA·리뷰·배송비 노출 확인.")
+            _ctr_vals = ad_df[ad_df["CTR"] > 0]["CTR"]
+            if len(_ctr_vals) >= 3:
+                _ctr_avg   = _ctr_vals.mean()
+                _ctr_last  = _ctr_vals.iloc[-1]
+                _ctr_color = "#27AE60" if _ctr_last >= _ctr_avg else "#E74C3C"
+                _ctr_msg   = ("현재 소재 반응 양호. 예산 증액 고려 가능." if _ctr_last >= _ctr_avg * 1.1
+                              else "CTR이 평균 대비 하락 — 소재 피로 신호. 이미지·문구 교체 시점." if _ctr_last < _ctr_avg * 0.8
+                              else "CTR 안정적 유지 중.")
+                _ae_lines.append(f"📣 CTR <b style='color:{_ctr_color}'>{_ctr_last:.2f}%</b> (평균 {_ctr_avg:.2f}%) — {_ctr_msg}")
+            _roas_vals = ad_df[ad_df["ROAS"] > 0]["ROAS"]
+            if not _roas_vals.empty:
+                _roas_last  = _roas_vals.iloc[-1]
+                _roas_color = "#27AE60" if _roas_last >= 3 else ("#F39C12" if _roas_last >= 1.5 else "#E74C3C")
+                _ae_lines.append(f"💰 최근 ROAS <b style='color:{_roas_color}'>{_roas_last:.1f}배</b> — {'수익 구간. 소재·타겟 유지하며 예산 확대.' if _roas_last >= 3 else '손익분기 근처. 전환 소재 추가 테스트 권장.' if _roas_last >= 1.5 else 'ROAS 손실 구간. 현 캠페인 일시 중단 후 소재·타겟 재설정 필요.'}")
+            _cpo_vals = ad_df[ad_df["CPO"] > 0]["CPO"]
+            if len(_cpo_vals) >= 2:
+                _cpo_trend = "개선" if _cpo_vals.iloc[-1] < _cpo_vals.mean() else "악화"
+                _ae_lines.append(f"🎯 CPO 추이 <b>{'↓ ' if _cpo_trend=='개선' else '↑ '}{int(_cpo_vals.iloc[-1]):,}원</b> (평균 {int(_cpo_vals.mean()):,}원) — {'전환 효율 개선 중. 지금 타겟·소재 조합 유지 권장.' if _cpo_trend=='개선' else 'CPO 상승 중 — 타겟 오디언스 포화 또는 소재 피로. 유사 타겟 전환 또는 소재 A/B 테스트 시작.'}")
+            elif total_spend > 0 and total_purchases == 0:
+                _ae_lines.append(f"⚠️ 전환 미발생 — 광고비 집행 중이나 CPO·ROAS 산출 불가. <b>조치:</b> 픽셀 이벤트 정상 수신 여부 확인 후, 전환 캠페인 대신 트래픽 캠페인으로 모수 확보 후 리타게팅 전환 집행 고려.")
             if _ae_lines:
-                insight_box(_ae_lines, COLOR["orange"])
+                insight_box(_ae_lines, COLOR["green"])
         else:
             st.info("광고 집행 데이터 없음")
 
@@ -840,17 +892,19 @@ with tab1:
         )
         st.plotly_chart(fig4, use_container_width=True)
 
-        pixel_total = int(nvr_df["신규"].sum())
-        latest_ret  = nvr_df["재방문"].iloc[-3:].mean()
-        early_ret   = nvr_df["재방문"].iloc[:max(1, len(nvr_df)-7)].mean()
-        ret_trend   = "📈 재방문자 증가 추세 — 브랜드 인지도 쌓이는 중" if latest_ret > early_ret * 1.2 else ""
-        st.markdown(f"""
-        <div style="background:#F0F9FF;border-left:4px solid {COLOR['blue']};padding:14px 18px;border-radius:8px;font-size:13px;color:#1A1A1A;">
-        📌 <b>누적 픽셀 모수 {pixel_total:,}명</b> — 리타게팅 캠페인이 이 모수 전체를 커버하도록 설정됐는지 확인.
-        신규 방문자는 방문 후 3~7일 내 리타게팅 시 전환율이 cold 대비 3~5배 높음.
-        {"&nbsp;&nbsp;|&nbsp;&nbsp;" + ret_trend if ret_trend else ""}
-        </div>
-        """, unsafe_allow_html=True)
+        _pixel_total = int(nvr_df["신규"].sum())
+        _latest_ret  = nvr_df["재방문"].iloc[-3:].mean()
+        _early_ret   = nvr_df["재방문"].iloc[:max(1, len(nvr_df)-7)].mean()
+        _ret_up      = _latest_ret > _early_ret * 1.2
+        _nr4_lines   = []
+        _nr4_lines.append(f"🎯 <b>누적 픽셀 모수 {_pixel_total:,}명</b> — 리타게팅 캠페인이 이 모수 전체를 커버하도록 설정됐는지 확인. 신규 방문 후 3~7일 내 리타게팅 시 전환율 cold 대비 3~5배 높음.")
+        if _ret_up:
+            _nr4_lines.append(f"📈 재방문자 최근 증가 추세 — 브랜드 인지도 누적 중. <b>액션플랜:</b> 재방문자 전용 '첫 구매 혜택' 리타게팅 광고 집행 타이밍.")
+        else:
+            _nr4_lines.append(f"📉 재방문 비율 정체 — 신규 방문자가 재방문으로 이어지지 않는 상황. <b>액션플랜:</b> 카카오 알림톡 또는 인스타 DM 팔로업, '장바구니 담기' 리마인드 광고 설정.")
+        if total_purchases == 0 and _pixel_total >= 100:
+            _nr4_lines.append(f"💡 전환 미발생이지만 모수 {_pixel_total:,}명 확보됨 — 지금이 '재고 한정·마감 임박' 메시지로 리타게팅 집행할 최적 타이밍.")
+        insight_box(_nr4_lines, COLOR["purple"])
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -879,12 +933,6 @@ with tab1:
                 hovermode="x unified",
             )
             st.plotly_chart(fig5, use_container_width=True)
-
-    # 기간 인사이트
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("---")
-    chart_container("🔍 기간 종합 인사이트",
-                    f"{df['날짜'].iloc[0]} ~ {df['날짜'].iloc[-1]} | {len(df)}일 분석")
 
     def generate_period_insight(df):
         insights = []
@@ -976,17 +1024,7 @@ with tab1:
             )
         return insights
 
-    period_insights = generate_period_insight(df)
-    for i, insight in enumerate(period_insights):
-        border_colors = [COLOR["blue"], COLOR["accent"], COLOR["green"], COLOR["orange"], COLOR["purple"]]
-        bc = border_colors[i % len(border_colors)]
-        st.markdown(f"""
-        <div style="background:#FFFFFF;border-left:4px solid {bc};padding:16px 20px;border-radius:8px;
-                    font-size:13px;color:#1A1A1A;margin-bottom:12px;border:1px solid #EBEBEB;
-                    box-shadow:0 1px 3px rgba(0,0,0,0.04);">
-        {insight.replace(chr(10), "<br>")}
-        </div>
-        """, unsafe_allow_html=True)
+    # (기간 종합 인사이트는 각 차트 아래로 이동됨)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1082,6 +1120,89 @@ with tab2:
                     badge_color=PLATFORM_COLORS.get(pname, "#888"),
                     sub=f"{cnt}건 | 실수익 {fmt_num(pr)}원 | 수익률 {rate}%"
                 )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 차트 0: 총 매출 트렌드 (자사몰 + 플랫폼 전체) ─────────────
+    chart_container("📈 총 매출 트렌드 (자사몰 + 플랫폼 전체)", "자사몰(GA4) + 모든 플랫폼 매출 합산 일별 추이")
+
+    # 플랫폼 일별 합계
+    _pf_trend = (pf_normal.dropna(subset=["주문일_dt"])
+                 .groupby("주문일_dt")["판매가"].sum()
+                 .reset_index()
+                 .rename(columns={"주문일_dt": "날짜_dt", "판매가": "플랫폼_매출"}))
+
+    # 자사몰(GA4) 데이터 — 동일 기간으로 필터
+    _df_own = df[["날짜_dt", "매출"]].copy().rename(columns={"매출": "자사몰_매출"})
+    if not _pf_trend.empty:
+        _date_min = _pf_trend["날짜_dt"].min()
+        _date_max = _pf_trend["날짜_dt"].max()
+        _df_own = _df_own[(_df_own["날짜_dt"] >= _date_min) & (_df_own["날짜_dt"] <= _date_max)]
+
+    # 병합
+    _trend_merged = pd.merge(_pf_trend, _df_own, on="날짜_dt", how="outer").fillna(0).sort_values("날짜_dt")
+    _trend_merged["총_매출"] = _trend_merged["플랫폼_매출"] + _trend_merged["자사몰_매출"]
+
+    if not _trend_merged.empty and _trend_merged["총_매출"].sum() > 0:
+        fig_total = go.Figure()
+        # 자사몰 라인
+        fig_total.add_trace(go.Scatter(
+            x=_trend_merged["날짜_dt"],
+            y=_trend_merged["자사몰_매출"],
+            name="자사몰",
+            mode="lines+markers",
+            line=dict(color="#4F86F7", width=2, dash="dot"),
+            marker=dict(size=5, color="#4F86F7"),
+            hovertemplate="<b>%{x|%Y-%m-%d}</b><br>자사몰: %{y:,}원<extra></extra>",
+        ))
+        # 플랫폼 전체 라인
+        fig_total.add_trace(go.Scatter(
+            x=_trend_merged["날짜_dt"],
+            y=_trend_merged["플랫폼_매출"],
+            name="플랫폼 전체",
+            mode="lines+markers",
+            line=dict(color="#F7964F", width=2, dash="dot"),
+            marker=dict(size=5, color="#F7964F"),
+            hovertemplate="<b>%{x|%Y-%m-%d}</b><br>플랫폼: %{y:,}원<extra></extra>",
+        ))
+        # 총 합계 라인 (굵게 강조)
+        fig_total.add_trace(go.Scatter(
+            x=_trend_merged["날짜_dt"],
+            y=_trend_merged["총_매출"],
+            name="총 합계",
+            mode="lines+markers",
+            line=dict(color="#1A1A2E", width=3),
+            marker=dict(size=7, color="#1A1A2E", line=dict(color="white", width=1.5)),
+            fill="tozeroy",
+            fillcolor="rgba(26,26,46,0.05)",
+            hovertemplate="<b>%{x|%Y-%m-%d}</b><br>총 합계: %{y:,}원<extra></extra>",
+        ))
+        fig_total.update_layout(
+            height=300, margin=dict(l=0, r=0, t=10, b=0),
+            plot_bgcolor="white", paper_bgcolor="white",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            xaxis=dict(
+                type="date", showgrid=False,
+                tickfont=dict(size=11), tickformat="%m/%d",
+            ),
+            yaxis=dict(showgrid=True, gridcolor="#F0F0F0",
+                       tickfont=dict(size=11), tickformat=",", title="매출액 (원)"),
+            hovermode="x unified",
+        )
+        # 7일 이동평균 (총 합계)
+        if len(_trend_merged) >= 7:
+            _ma7 = _trend_merged["총_매출"].rolling(7, min_periods=1).mean()
+            fig_total.add_trace(go.Scatter(
+                x=_trend_merged["날짜_dt"],
+                y=_ma7,
+                name="7일 이동평균",
+                mode="lines",
+                line=dict(color="#E74C3C", width=1.5, dash="dash"),
+                hovertemplate="<b>%{x|%Y-%m-%d}</b><br>7일 MA: %{y:,.0f}원<extra></extra>",
+            ))
+        st.plotly_chart(fig_total, use_container_width=True)
+    else:
+        st.info("선택 기간에 매출 데이터가 없어요.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1531,7 +1652,8 @@ with tab3:
                     .agg(매출=("판매가", "sum"), 수량=("수량", "sum"), 주문수=("판매가", "count"))
                     .reset_index().sort_values("매출", ascending=False).head(10)
                 )
-                t3_top_s = t3_top.sort_values("매출", ascending=True).copy()
+                t3_top_s = t3_top.sort_values("매출", ascending=True)
+                t3_top_s = t3_top_s.copy()
                 t3_top_s["상품명_s"] = t3_top_s["상품명"].apply(
                     lambda x: x[:24] + "…" if len(str(x)) > 24 else str(x)
                 )
