@@ -338,6 +338,121 @@ def update_meta_yesterday():
     except Exception as e:
         return False, f"❌ Meta 업데이트 실패: {e}"
 
+def update_cafe24_yesterday():
+    """Cafe24 API로 어제 주문 수집 → 🏬 플랫폼 매출 시트에 추가"""
+    try:
+        import sys, json, base64, re as _re
+        from datetime import datetime as _dt2
+
+        CAFE24_TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cafe24_token.json")
+        if not os.path.exists(CAFE24_TOKEN_FILE):
+            return False, "⚠️ Cafe24 토큰 파일 없음 (cafe24_token.json)"
+
+        with open(CAFE24_TOKEN_FILE) as f:
+            t = json.load(f)
+
+        # 토큰 갱신
+        if t.get("expires_at"):
+            try:
+                exp = _dt2.fromisoformat(t["expires_at"].replace(".000", ""))
+                if _dt2.now() >= exp - timedelta(minutes=10):
+                    cred_b64 = base64.b64encode(f"{t['client_id']}:{t['client_secret']}".encode()).decode()
+                    resp = requests.post(
+                        f"https://{t['mall_id']}.cafe24api.com/api/v2/oauth/token",
+                        headers={"Authorization": f"Basic {cred_b64}", "Content-Type": "application/x-www-form-urlencoded"},
+                        data={"grant_type": "refresh_token", "refresh_token": t["refresh_token"]}
+                    ).json()
+                    if "access_token" in resp:
+                        t.update(resp)
+                        with open(CAFE24_TOKEN_FILE, "w") as f2:
+                            json.dump(t, f2, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+
+        yesterday  = _date.today() - timedelta(days=1)
+        start_str  = yesterday.strftime("%Y-%m-%d")
+        end_str    = start_str
+        mall_id    = t["mall_id"]
+        access_tok = t["access_token"]
+
+        MUSINSA_IDS = {"musinsa"}
+        COMMISSION_C24  = 3
+        COMMISSION_MUS  = 30
+
+        headers_api = {"Authorization": f"Bearer {access_tok}", "Content-Type": "application/json"}
+        orders_all  = []
+        limit, offset = 100, 0
+        while True:
+            res = requests.get(
+                f"https://{mall_id}.cafe24api.com/api/v2/admin/orders",
+                headers=headers_api,
+                params={"start_date": start_str, "end_date": end_str,
+                        "date_type": "order_date", "limit": limit, "offset": offset}
+            ).json()
+            batch = res.get("orders", [])
+            orders_all.extend(batch)
+            if len(batch) < limit:
+                break
+            offset += limit
+
+        if not orders_all:
+            return True, f"✅ Cafe24 {yesterday.month}/{yesterday.day} — 주문 없음"
+
+        def _opt(opt_str):
+            color, size = "-", "-"
+            if not opt_str: return color, size
+            for item in str(opt_str).split(","):
+                item = item.strip()
+                if "사이즈" in item or item.upper() in ("XS","S","M","L","XL","XXL","FREE","ONE SIZE"):
+                    size = _re.sub(r'^.*?:', '', item).strip()
+                elif item:
+                    color = item
+            return color, size
+
+        rows_new = []
+        for o in orders_all:
+            market  = str(o.get("market_id", "")).lower()
+            pfm     = "무신사" if market in MUSINSA_IDS else "Cafe24"
+            comm    = COMMISSION_MUS if pfm == "무신사" else COMMISSION_C24
+            odate   = str(o.get("order_date", ""))[:10]
+            status_raw = str(o.get("order_status", ""))
+            status  = "취소" if "cancel" in status_raw.lower() else "정상"
+            for item in o.get("items", []) or []:
+                pname   = str(item.get("product_name", ""))
+                code    = str(item.get("product_code", ""))
+                color, size = _opt(item.get("option_value", ""))
+                qty   = int(item.get("quantity", 1) or 1)
+                price = int(float(item.get("product_price", 0) or 0)) * qty
+                profit = round(price * (1 - comm / 100))
+                rows_new.append([pfm, odate, pname, code, color, size, qty, price, comm, profit, status])
+
+        SCOPES_SA = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        SA_FILE_P = os.path.join(os.path.dirname(os.path.abspath(__file__)), "service_account.json")
+        if os.path.exists(SA_FILE_P):
+            sa_creds = SACredentials.from_service_account_file(SA_FILE_P, scopes=SCOPES_SA)
+        elif "gcp_service_account" in st.secrets:
+            sa_creds = SACredentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES_SA)
+        else:
+            return False, "❌ Cafe24: 서비스 계정 인증 정보 없음"
+
+        gc2 = gspread.authorize(sa_creds)
+        ws2 = gc2.open_by_key(SPREADSHEET_ID).worksheet(PLATFORM_SHEET_NAME)
+        existing = set()
+        for row in ws2.get_all_values()[1:]:
+            if len(row) >= 6:
+                existing.add(f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}")
+
+        to_add = [r for r in rows_new if f"{r[0]}|{r[1]}|{r[3]}|{r[4]}|{r[5]}" not in existing]
+        if to_add:
+            ws2.append_rows(to_add, value_input_option="USER_ENTERED")
+
+        c24_cnt = sum(1 for r in to_add if r[0] == "Cafe24")
+        mus_cnt = sum(1 for r in to_add if r[0] == "무신사")
+        return True, f"✅ Cafe24 {yesterday.month}/{yesterday.day} 완료 — Cafe24 {c24_cnt}건 / 무신사 {mus_cnt}건 추가"
+    except Exception as e:
+        return False, f"❌ Cafe24 업데이트 실패: {e}"
+
+
 # ── 데이터 로드: 방문자/광고 ────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_data():
@@ -516,6 +631,7 @@ with col_refresh:
         with st.spinner("전일자 데이터 업데이트 중..."):
             ok1, msg1 = update_ga4_yesterday()
             ok2, msg2 = update_meta_yesterday()
+            ok3, msg3 = update_cafe24_yesterday()
         if ok1:
             st.toast(msg1, icon="✅")
         else:
@@ -524,6 +640,10 @@ with col_refresh:
             st.toast(msg2, icon="✅")
         else:
             st.toast(msg2, icon="⚠️")
+        if ok3:
+            st.toast(msg3, icon="✅")
+        else:
+            st.toast(msg3, icon="⚠️")
         # 각 캐시 함수 명시적으로 개별 초기화 (st.cache_data.clear()만으론 Cloud에서 불안정)
         load_data.clear()
         load_platform_data.clear()
