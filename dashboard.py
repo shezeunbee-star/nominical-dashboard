@@ -1123,19 +1123,7 @@ with tab2:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── 자사몰(GA4) 데이터 사전 준비 (차트 A에서 공용) ──────────────
-    _pf_by_date = (pf_normal.dropna(subset=["주문일_dt"])
-                   .groupby("주문일_dt")["판매가"].sum()
-                   .reset_index()
-                   .rename(columns={"주문일_dt": "날짜_dt", "판매가": "플랫폼_매출"}))
-    _df_own = df[["날짜_dt", "매출"]].copy().rename(columns={"매출": "자사몰_매출"})
-    if not _pf_by_date.empty:
-        _d_min, _d_max = _pf_by_date["날짜_dt"].min(), _pf_by_date["날짜_dt"].max()
-        _df_own = _df_own[(_df_own["날짜_dt"] >= _d_min) & (_df_own["날짜_dt"] <= _d_max)]
-    _trend_merged = pd.merge(_pf_by_date, _df_own, on="날짜_dt", how="outer").fillna(0).sort_values("날짜_dt")
-    _trend_merged["총_매출"] = _trend_merged["플랫폼_매출"] + _trend_merged["자사몰_매출"]
-
-    # ── 차트 A: 도넛 + 일별 매출 트렌드 (플랫폼별 + 자사몰 + 총합계) ──
+    # ── 차트 A: 도넛 + 일별 매출 트렌드 ──────────────────────────
     col_a, col_b = st.columns([2, 3])
 
     with col_a:
@@ -1163,16 +1151,21 @@ with tab2:
             st.plotly_chart(fig_d, use_container_width=True)
 
     with col_b:
-        chart_container("일별 매출 트렌드", "플랫폼별 + 자사몰 + 총합계")
+        chart_container("일별 매출 트렌드", "플랫폼별 일별 추이 · 총합계")
         # 핵심 fix: 주문일_dt(datetime) 기준으로 그룹핑 → Jan 2000 버그 해결
         pf_trend_src = pf_normal.dropna(subset=["주문일_dt"]).copy()
         pf_daily = (pf_trend_src
                     .groupby(["주문일_dt", "플랫폼"])["판매가"]
                     .sum().reset_index()
                     .sort_values("주문일_dt"))
+        # 총합계 (플랫폼 전체 합산) — 날짜별
+        pf_total_by_date = (pf_trend_src
+                            .groupby("주문일_dt")["판매가"]
+                            .sum().reset_index()
+                            .sort_values("주문일_dt"))
         if not pf_daily.empty:
             fig_t = go.Figure()
-            # 플랫폼별 라인 (가는 선, 배경 역할)
+            # 플랫폼별 라인 — 모두 실선, 색상으로만 구분
             for pname in pf_daily["플랫폼"].unique():
                 sub_t = pf_daily[pf_daily["플랫폼"] == pname].copy()
                 _mode = "lines+markers" if len(sub_t) > 1 else "markers"
@@ -1185,55 +1178,30 @@ with tab2:
                     line=dict(color=PLATFORM_COLORS.get(pname, "#888"), width=1.8),
                     marker=dict(size=_msize, color=PLATFORM_COLORS.get(pname, "#888"),
                                 line=dict(color="white", width=1)),
-                    hovertemplate=(
-                        f"<b>%{{x|%Y-%m-%d}}</b><br>{pname}: %{{y:,}}원<extra></extra>"
-                    ),
+                    hovertemplate=f"<b>%{{x|%Y-%m-%d}}</b><br>{pname}: %{{y:,}}원<extra></extra>",
                 ))
-            # 자사몰 라인
-            if _trend_merged["자사몰_매출"].sum() > 0:
-                fig_t.add_trace(go.Scatter(
-                    x=_trend_merged["날짜_dt"],
-                    y=_trend_merged["자사몰_매출"],
-                    name="자사몰",
-                    mode="lines+markers",
-                    line=dict(color="#00BCD4", width=2, dash="dot"),  # 자사몰: 시안(청록) — 플랫폼 색과 구분
-                    marker=dict(size=5, color="#00BCD4"),
-                    hovertemplate="<b>%{x|%Y-%m-%d}</b><br>자사몰: %{y:,}원<extra></extra>",
-                ))
-            # 총 합계 라인 (굵게 강조 + 면적)
-            if _trend_merged["총_매출"].sum() > 0:
-                fig_t.add_trace(go.Scatter(
-                    x=_trend_merged["날짜_dt"],
-                    y=_trend_merged["총_매출"],
-                    name="총 합계",
-                    mode="lines+markers",
-                    line=dict(color="#FF6B35", width=3),   # 총합계: 주황 — 무신사 블랙·29CM 레드와 구분
-                    marker=dict(size=6, color="#FF6B35", line=dict(color="white", width=1.5)),
-                    fill="tozeroy",
-                    fillcolor="rgba(255,107,53,0.05)",
-                    hovertemplate="<b>%{x|%Y-%m-%d}</b><br>총 합계: %{y:,}원<extra></extra>",
-                ))
-                # 7일 이동평균 (총 합계, 7일 이상 데이터 시)
-                if len(_trend_merged) >= 7:
-                    _ma7 = _trend_merged["총_매출"].rolling(7, min_periods=1).mean()
-                    fig_t.add_trace(go.Scatter(
-                        x=_trend_merged["날짜_dt"],
-                        y=_ma7,
-                        name="7일 MA",
-                        mode="lines",
-                        line=dict(color="#9E9E9E", width=1.5, dash="dash"),  # 7일 MA: 중간 회색 — 보조선
-                        hovertemplate="<b>%{x|%Y-%m-%d}</b><br>7일 MA: %{y:,.0f}원<extra></extra>",
-                    ))
+            # 총합계 라인 — 굵은 실선 + 연한 면적
+            fig_t.add_trace(go.Scatter(
+                x=pf_total_by_date["주문일_dt"],
+                y=pf_total_by_date["판매가"],
+                name="총합계",
+                mode="lines+markers",
+                line=dict(color="#FF6B35", width=3),
+                marker=dict(size=6, color="#FF6B35", line=dict(color="white", width=1.5)),
+                fill="tozeroy",
+                fillcolor="rgba(255,107,53,0.05)",
+                hovertemplate="<b>%{x|%Y-%m-%d}</b><br>총합계: %{y:,}원<extra></extra>",
+            ))
             fig_t.update_layout(
                 height=320, margin=dict(l=0, r=0, t=10, b=0),
                 plot_bgcolor="white", paper_bgcolor="white",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
                             font=dict(size=11)),
                 xaxis=dict(
-                    type="date",               # 명시적 date 타입 지정 — Jan 2000 버그 방지
+                    type="date",
                     showgrid=False,
                     tickfont=dict(size=11),
-                    tickformat="%m/%d",        # MM/DD 형식 표기
+                    tickformat="%m/%d",
                 ),
                 yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11),
                            tickformat=",", title="매출액 (원)"),
