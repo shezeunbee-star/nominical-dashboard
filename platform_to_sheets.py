@@ -6,6 +6,8 @@
   - 상품준비중내역*.xlsx       → W컨셉
   - 배송조회*.xls              → SSF
   - 발송처리목록*.xlsx         → SI Village
+  - 최근 주문내역*.xlsx          → Cafe24 (자사몰)
+  - 결제완료내역*.xlsx           → Cafe24 (자사몰)
 """
 import sys, os, re
 import openpyxl, xlrd, gspread
@@ -15,7 +17,8 @@ from datetime import datetime
 SA_FILE        = os.path.join(os.path.dirname(os.path.abspath(__file__)), "service_account.json")
 SPREADSHEET_ID = "1y9mZirj81sR2tkkGV_wTzFvJonPdJU-JuErSRDo_73E"
 SHEET_NAME     = "🏬 플랫폼 매출"
-COMMISSION     = 30  # 공통 수수료율 (%)
+COMMISSION        = 30  # 공통 수수료율 (%)
+COMMISSION_CAFE24 = 3   # Cafe24 자사몰 PG 수수료율 (%)
 
 creds = SACredentials.from_service_account_file(SA_FILE, scopes=[
     "https://www.googleapis.com/auth/spreadsheets",
@@ -203,6 +206,67 @@ def parse_sivillage(filepath):
         ])
     return rows
 
+
+def parse_color_size_cafe24(option_name):
+    """Cafe24 옵션: '상품명(색상=워시드차콜, 사이즈=M)' 또는 '상품명(사이즈=L)' 형식"""
+    color, size = "-", "-"
+    if not option_name:
+        return color, size
+    s = str(option_name)
+    m_color = re.search(r'색상=([^,)]+)', s)
+    m_size  = re.search(r'사이즈=([^,)]+)', s)
+    if m_color:
+        color = m_color.group(1).strip()
+    if m_size:
+        size  = m_size.group(1).strip()
+    # 색상 없고 괄호 안에 단어만 있는 경우: 상품명 (차콜그레이)(사이즈=L)
+    if color == "-" and not m_size:
+        m_paren = re.search(r'\(([^)]+)\)', s)
+        if m_paren:
+            val = m_paren.group(1).strip()
+            if not val.startswith('사이즈=') and not val.startswith('색상='):
+                color = val
+    return color, size
+
+def parse_cafe24(filepath):
+    """Cafe24 자사몰 주문 엑셀 파싱 (최근 주문내역.xlsx / 결제완료내역.xlsx)"""
+    print(f"  📦 Cafe24 파싱: {os.path.basename(filepath)}")
+    wb = openpyxl.load_workbook(filepath)
+    ws_f = wb.active
+    rows = []
+    for i, row in enumerate(ws_f.iter_rows(values_only=True)):
+        if i == 0:
+            continue
+        order_no = str(row[2]) if row[2] else ""
+        product  = str(row[8]) if row[8] else ""
+        if not product:
+            continue
+        # 날짜: 발주일(index 19) 우선, 없으면 주문번호 앞 8자리
+        if row[19]:
+            date = fmt_date(row[19])
+        elif len(order_no) >= 8 and order_no[:8].isdigit():
+            try:
+                date = datetime.strptime(order_no[:8], "%Y%m%d").strftime("%Y-%m-%d")
+            except ValueError:
+                date = ""
+        else:
+            date = ""
+        color, size = parse_color_size_cafe24(row[9])
+        qty    = int(row[10]) if row[10] else 1
+        price  = int(row[11]) if row[11] else 0
+        total  = price * qty
+        profit = round(total * (1 - COMMISSION_CAFE24 / 100))
+        # 총 결제금액(index 6) == 0 이면 미결제/취소
+        paid   = row[6] if row[6] is not None else 0
+        status = "취소" if int(paid) == 0 and price > 0 else "정상"
+        code   = str(row[3]) if row[3] else order_no  # 품목별 주문번호
+        rows.append([
+            "Cafe24", date,
+            product, code,
+            color, size, qty, total,
+            COMMISSION_CAFE24, profit, status
+        ])
+    return rows
 # ── 플랫폼 감지 ─────────────────────────────────────────────────
 
 def detect_platform(filepath):
@@ -211,6 +275,8 @@ def detect_platform(filepath):
     if "상품준비중" in name:   return "wconcept"
     if "배송조회" in name:     return "ssf"
     if "발송처리목록" in name: return "sivillage"
+    if "주문내역" in name:       return "cafe24"
+    if "결제완료내역" in name:    return "cafe24"
     return None
 
 # ── 메인 ────────────────────────────────────────────────────────
@@ -230,6 +296,7 @@ def main(files):
         elif platform == "wconcept":   rows = parse_wconcept(filepath)
         elif platform == "ssf":        rows = parse_ssf(filepath)
         elif platform == "sivillage":  rows = parse_sivillage(filepath)
+        elif platform == "cafe24":       rows = parse_cafe24(filepath)
         else:
             rows = []
 
@@ -256,5 +323,6 @@ if __name__ == "__main__":
         print("  W컨셉      → 파일명에 '상품준비중' 포함")
         print("  SSF        → 파일명에 '배송조회' 포함")
         print("  SI Village → 파일명에 '발송처리목록' 포함")
+        print("  Cafe24     → 파일명에 '주문내역' 또는 '결제완료내역' 포함")
     else:
         main(sys.argv[1:])
