@@ -442,7 +442,7 @@ def load_data():
 
 
 # ── 데이터 로드: 플랫폼 매출 ────────────────────────────────────────
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_platform_data():
     SCOPES = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -524,7 +524,9 @@ with col_refresh:
             st.toast(msg2, icon="✅")
         else:
             st.toast(msg2, icon="⚠️")
-        st.cache_data.clear()
+        # 각 캐시 함수 명시적으로 개별 초기화 (st.cache_data.clear()만으론 Cloud에서 불안정)
+        load_data.clear()
+        load_platform_data.clear()
         st.rerun()
 
 st.markdown("---")
@@ -1155,6 +1157,10 @@ with tab2:
     if df_platform_all.empty:
         st.info("🏬 플랫폼 매출 데이터가 없어요. platform_to_sheets.py로 데이터를 먼저 업로드해 주세요.")
         st.stop()
+
+    # 마지막 갱신 시간 표시
+    from datetime import datetime as _dt
+    st.caption(f"🕐 데이터 기준: {_dt.now().strftime('%Y-%m-%d %H:%M')} 로드 | 🔄 버튼으로 최신 데이터 반영")
 
     # ── 기간 필터 ─────────────────────────────────────────────────
     # 주차 목록 (주차별 필터 옵션)
