@@ -603,7 +603,7 @@ with tab1:
     # KPI 인사이트
     _kpi_lines = []
     if len(df) >= 7:
-        _r7  = df.tail(7); _p7 = df.iloc[-14:-7] if len(df) >= 14 else df.head(max(1,len(df)-7)]
+        _r7  = df.tail(7); _p7 = df.iloc[-14:-7] if len(df) >= 14 else df.head(max(1,len(df)-7))
         _v_r = int(_r7["방문자"].sum()); _v_p = int(_p7["방문자"].sum())
         _s_r = int(_r7["광고비"].sum()); _s_p = int(_p7["광고비"].sum())
         _c_r = int(_r7["구매"].sum());   _c_p = int(_p7["구매"].sum())
