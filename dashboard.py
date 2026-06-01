@@ -338,121 +338,6 @@ def update_meta_yesterday():
     except Exception as e:
         return False, f"❌ Meta 업데이트 실패: {e}"
 
-def update_cafe24_yesterday():
-    """Cafe24 API로 어제 주문 수집 → 🏬 플랫폼 매출 시트에 추가"""
-    try:
-        import sys, json, base64, re as _re
-        from datetime import datetime as _dt2
-
-        CAFE24_TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cafe24_token.json")
-        if not os.path.exists(CAFE24_TOKEN_FILE):
-            return False, "⚠️ Cafe24 토큰 파일 없음 (cafe24_token.json)"
-
-        with open(CAFE24_TOKEN_FILE) as f:
-            t = json.load(f)
-
-        # 토큰 갱신
-        if t.get("expires_at"):
-            try:
-                exp = _dt2.fromisoformat(t["expires_at"].replace(".000", ""))
-                if _dt2.now() >= exp - timedelta(minutes=10):
-                    cred_b64 = base64.b64encode(f"{t['client_id']}:{t['client_secret']}".encode()).decode()
-                    resp = requests.post(
-                        f"https://{t['mall_id']}.cafe24api.com/api/v2/oauth/token",
-                        headers={"Authorization": f"Basic {cred_b64}", "Content-Type": "application/x-www-form-urlencoded"},
-                        data={"grant_type": "refresh_token", "refresh_token": t["refresh_token"]}
-                    ).json()
-                    if "access_token" in resp:
-                        t.update(resp)
-                        with open(CAFE24_TOKEN_FILE, "w") as f2:
-                            json.dump(t, f2, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
-
-        yesterday  = _date.today() - timedelta(days=1)
-        start_str  = yesterday.strftime("%Y-%m-%d")
-        end_str    = start_str
-        mall_id    = t["mall_id"]
-        access_tok = t["access_token"]
-
-        MUSINSA_IDS = {"musinsa"}
-        COMMISSION_C24  = 3
-        COMMISSION_MUS  = 30
-
-        headers_api = {"Authorization": f"Bearer {access_tok}", "Content-Type": "application/json"}
-        orders_all  = []
-        limit, offset = 100, 0
-        while True:
-            res = requests.get(
-                f"https://{mall_id}.cafe24api.com/api/v2/admin/orders",
-                headers=headers_api,
-                params={"start_date": start_str, "end_date": end_str,
-                        "date_type": "order_date", "limit": limit, "offset": offset}
-            ).json()
-            batch = res.get("orders", [])
-            orders_all.extend(batch)
-            if len(batch) < limit:
-                break
-            offset += limit
-
-        if not orders_all:
-            return True, f"✅ Cafe24 {yesterday.month}/{yesterday.day} — 주문 없음"
-
-        def _opt(opt_str):
-            color, size = "-", "-"
-            if not opt_str: return color, size
-            for item in str(opt_str).split(","):
-                item = item.strip()
-                if "사이즈" in item or item.upper() in ("XS","S","M","L","XL","XXL","FREE","ONE SIZE"):
-                    size = _re.sub(r'^.*?:', '', item).strip()
-                elif item:
-                    color = item
-            return color, size
-
-        rows_new = []
-        for o in orders_all:
-            market  = str(o.get("market_id", "")).lower()
-            pfm     = "무신사" if market in MUSINSA_IDS else "Cafe24"
-            comm    = COMMISSION_MUS if pfm == "무신사" else COMMISSION_C24
-            odate   = str(o.get("order_date", ""))[:10]
-            status_raw = str(o.get("order_status", ""))
-            status  = "취소" if "cancel" in status_raw.lower() else "정상"
-            for item in o.get("items", []) or []:
-                pname   = str(item.get("product_name", ""))
-                code    = str(item.get("product_code", ""))
-                color, size = _opt(item.get("option_value", ""))
-                qty   = int(item.get("quantity", 1) or 1)
-                price = int(float(item.get("product_price", 0) or 0)) * qty
-                profit = round(price * (1 - comm / 100))
-                rows_new.append([pfm, odate, pname, code, color, size, qty, price, comm, profit, status])
-
-        SCOPES_SA = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        SA_FILE_P = os.path.join(os.path.dirname(os.path.abspath(__file__)), "service_account.json")
-        if os.path.exists(SA_FILE_P):
-            sa_creds = SACredentials.from_service_account_file(SA_FILE_P, scopes=SCOPES_SA)
-        elif "gcp_service_account" in st.secrets:
-            sa_creds = SACredentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES_SA)
-        else:
-            return False, "❌ Cafe24: 서비스 계정 인증 정보 없음"
-
-        gc2 = gspread.authorize(sa_creds)
-        ws2 = gc2.open_by_key(SPREADSHEET_ID).worksheet(PLATFORM_SHEET_NAME)
-        existing = set()
-        for row in ws2.get_all_values()[1:]:
-            if len(row) >= 6:
-                existing.add(f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}")
-
-        to_add = [r for r in rows_new if f"{r[0]}|{r[1]}|{r[3]}|{r[4]}|{r[5]}" not in existing]
-        if to_add:
-            ws2.append_rows(to_add, value_input_option="USER_ENTERED")
-
-        c24_cnt = sum(1 for r in to_add if r[0] == "Cafe24")
-        mus_cnt = sum(1 for r in to_add if r[0] == "무신사")
-        return True, f"✅ Cafe24 {yesterday.month}/{yesterday.day} 완료 — Cafe24 {c24_cnt}건 / 무신사 {mus_cnt}건 추가"
-    except Exception as e:
-        return False, f"❌ Cafe24 업데이트 실패: {e}"
-
-
 # ── 데이터 로드: 방문자/광고 ────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_data():
@@ -557,7 +442,7 @@ def load_data():
 
 
 # ── 데이터 로드: 플랫폼 매출 ────────────────────────────────────────
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def load_platform_data():
     SCOPES = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -631,7 +516,6 @@ with col_refresh:
         with st.spinner("전일자 데이터 업데이트 중..."):
             ok1, msg1 = update_ga4_yesterday()
             ok2, msg2 = update_meta_yesterday()
-            ok3, msg3 = update_cafe24_yesterday()
         if ok1:
             st.toast(msg1, icon="✅")
         else:
@@ -640,13 +524,7 @@ with col_refresh:
             st.toast(msg2, icon="✅")
         else:
             st.toast(msg2, icon="⚠️")
-        if ok3:
-            st.toast(msg3, icon="✅")
-        else:
-            st.toast(msg3, icon="⚠️")
-        # 각 캐시 함수 명시적으로 개별 초기화 (st.cache_data.clear()만으론 Cloud에서 불안정)
-        load_data.clear()
-        load_platform_data.clear()
+        st.cache_data.clear()
         st.rerun()
 
 st.markdown("---")
@@ -809,79 +687,15 @@ with tab1:
     _ad_days_cnt = len(df[df["광고비"]>0])
     _conv_days_cnt = len(df[df["구매"]>0])
     if total_spend > 0:
-        _spend_per_day = round(total_spend / max(_ad_days_cnt, 1))
-        _conv_hit_rate = round(_conv_days_cnt / max(_ad_days_cnt, 1) * 100)
-        _vis_lines.append(
-            f"💸 광고 집행일 <b>{_ad_days_cnt}일</b> · 일평균 <b>{_spend_per_day:,}원</b> 집행 "
-            f"→ 전환 발생일 <b>{_conv_days_cnt}일</b> ({_conv_hit_rate}%)"
-        )
-        if _conv_days_cnt == 0:
-            _vis_lines.append(
-                f"⚠️ <b>전환 0건</b> — 광고비 {total_spend:,}원을 쓰고 있는데 구매가 한 건도 없어요. "
-                f"원인을 단계별로 체크하세요: "
-                f"① <b>소재↔랜딩 불일치</b>: 광고 이미지와 상품페이지 첫 화면이 다르면 즉시 이탈 — 소재와 동일한 착용컷을 랜딩 최상단에 배치하세요. "
-                f"② <b>결제 마찰</b>: 배송비·회원가입 강제가 결제 직전 이탈을 만들어요 — 게스트 결제 허용 또는 배송비를 상품가에 포함하는 방식을 검토하세요. "
-                f"③ <b>타겟 불일치</b>: 메타 광고 관리자에서 '링크 클릭 → 장바구니 추가 → 구매' 퍼널 이탈율을 확인해 병목 구간을 특정하세요."
-            )
+        _spend_per_day = round(total_spend / max(_ad_days_cnt,1))
+        _vis_lines.append(f"💸 광고 집행일 {_ad_days_cnt}일 · 일평균 {_spend_per_day:,}원 집행 → 전환 발생일 {_conv_days_cnt}일 ({round(_conv_days_cnt/max(_ad_days_cnt,1)*100)}%)")
+        if _conv_days_cnt == 0 and total_spend > 0:
+            _vis_lines.append(f"⚠️ 광고비 {total_spend:,}원 집행했으나 전환 0건 — 소재 교체 또는 랜딩 페이지 점검 필요. 클릭 후 이탈 구간(상품페이지→장바구니→결제) 확인 권장.")
         elif total_purchases > 0:
-            _cvr = round(total_purchases / max(total_visitors, 1) * 100, 2)
-            _cpo = round(total_spend / total_purchases)
-            if _cvr >= 2.0:
-                _cvr_msg = (
-                    f"전환율 <b style='color:#27AE60'>{_cvr}%</b> — 패션 이커머스 평균(1~2%)을 상회하는 우수한 수치예요. "
-                    f"소재·상품페이지 조합이 잘 맞고 있어요. 지금이 트래픽을 늘릴 타이밍이에요 — 일예산을 주 단위로 20~30%씩 점진적으로 증액해보세요."
-                )
-            elif _cvr >= 1.0:
-                _cvr_msg = (
-                    f"전환율 <b style='color:#F39C12'>{_cvr}%</b> — 패션 이커머스 평균(1~2%) 범위예요. "
-                    f"리뷰 수·별점 강화, 상세페이지 상단에 광고 소재와 동일한 착용컷 배치, 사이즈 가이드 접근성 개선으로 "
-                    f"전환율을 1~2%p 더 끌어올릴 수 있어요."
-                )
-            else:
-                _cvr_msg = (
-                    f"전환율 <b style='color:#E74C3C'>{_cvr}%</b> — 패션 이커머스 평균(1~2%) 미달이에요. "
-                    f"방문자는 들어오지만 구매로 이어지지 않는 상황이에요. "
-                    f"GA4에서 '상품 조회 → 장바구니 → 결제 완료' 퍼널 이탈율을 확인하고, "
-                    f"가장 이탈이 큰 단계에 집중 개선이 필요해요."
-                )
-            _vis_lines.append(f"🎯 {_cvr_msg}")
-            if _cpo < 30000:
-                _cpo_label = f"<b style='color:#27AE60'>{_cpo:,}원</b> — 효율 좋은 구간이에요. 이 소재·타겟 조합을 메인으로 유지하면서 예산 증액을 검토하세요."
-            elif _cpo < 70000:
-                _cpo_label = (
-                    f"<b style='color:#F39C12'>{_cpo:,}원</b> — 상품 평균 객단가를 기준으로 손익분기 CPO를 설정해보세요. "
-                    f"객단가의 20~30% 이하가 일반적인 목표 CPO 범위예요. 리타게팅 비중을 높이면 CPO를 낮출 수 있어요."
-                )
-            else:
-                _cpo_label = (
-                    f"<b style='color:#E74C3C'>{_cpo:,}원</b> — CPO가 높아요. 광범위 신규 타겟보다 "
-                    f"'웹사이트 방문자' 맞춤 타겟 리타게팅 캠페인으로 전환하면 CPO를 30~50% 낮출 수 있어요."
-                )
-            _vis_lines.append(f"💡 CPO {_cpo_label}")
+            _cpo = round(total_spend/total_purchases)
+            _vis_lines.append(f"🎯 CPO {_cpo:,}원 · 전환율 {round(total_purchases/max(total_visitors,1)*100,2)}% — {'효율 양호. 전환 집중 소재 예산 증액 검토.' if _cpo<50000 else 'CPO 높음. 타겟 범위 좁히거나 리타게팅 비중 확대 필요.'}")
     elif total_visitors > 0:
-        _avg_vis = df["방문자"].mean()
-        _max_vis = df["방문자"].max()
-        if _max_vis > _avg_vis * 2:
-            _vis_lines.append(
-                f"📌 광고 미집행 기간 — 방문자 {total_visitors:,}명 순수 오가닉 유입. "
-                f"최대 {int(_max_vis):,}명 스파이크(평균 대비 {round(_max_vis/_avg_vis, 1)}배)가 있었어요. "
-                f"이 날 어떤 콘텐츠가 확산됐는지 분석해 같은 포맷을 반복 생산하면 오가닉 트래픽 기반을 구조적으로 늘릴 수 있어요."
-            )
-        else:
-            _vis_lines.append(
-                f"📌 광고 미집행 기간 — 방문자 {total_visitors:,}명 오가닉 유입. "
-                f"꾸준한 콘텐츠 발행으로 유기 트래픽 기반을 쌓는 중이에요."
-            )
-    if len(df) > 3:
-        _mx = df.loc[df["방문자"].idxmax()]
-        _avg_v = df["방문자"].mean()
-        if _mx["방문자"] > _avg_v * 2.5 and total_spend > 0:
-            _ch_map = {"메타광고": _mx["유입_메타"], "공식인스타": _mx["유입_공식"], "개인인스타": _mx["유입_개인"], "직접방문": _mx["유입_직접"]}
-            _top_ch = max(_ch_map, key=_ch_map.get)
-            _vis_lines.append(
-                f"📈 <b>{_mx['날짜']} 트래픽 스파이크</b> — 평균 대비 {round(_mx['방문자']/_avg_v, 1)}배 급등, "
-                f"주요 유입: {_top_ch}. 이 날 집행 소재·콘텐츠를 분석해 같은 패턴으로 재활용하세요."
-            )
+        _vis_lines.append(f"📌 광고 미집행 기간 — 방문자 {total_visitors:,}명 오가닉 유입. 콘텐츠/SNS 자연 유입 중.")
     if _vis_lines:
         insight_box(_vis_lines, "#4ECBA0")
 
@@ -948,76 +762,15 @@ with tab1:
             # 광고효율 인사이트
             _ae_lines = []
             _avg_ctr = ctr_df["CTR"].mean() if not ctr_df.empty else 0
-            _recent_ctr = ctr_df["CTR"].iloc[-3:].mean() if len(ctr_df) >= 3 else _avg_ctr
+            _recent_ctr = ctr_df["CTR"].iloc[-3:].mean() if len(ctr_df)>=3 else _avg_ctr
             if _avg_ctr > 0:
-                if _avg_ctr >= 2.0:
-                    _ctr_level = f"<b style='color:#27AE60'>{_avg_ctr:.2f}%</b> — 패션 광고 CTR 우수 구간(2%+)이에요. 이 소재·타겟 조합을 메인으로 고정하고 예산을 집중하세요."
-                elif _avg_ctr >= 1.0:
-                    _ctr_level = (
-                        f"<b style='color:#F39C12'>{_avg_ctr:.2f}%</b> — CTR 보통 수준이에요. "
-                        f"썸네일 첫 1초 임팩트를 강화하거나 후크(Hook) 문구를 변경해 클릭률을 끌어올릴 여지가 있어요."
-                    )
-                else:
-                    _ctr_level = (
-                        f"<b style='color:#E74C3C'>{_avg_ctr:.2f}%</b> — CTR 낮아요. "
-                        f"노출 대비 클릭이 적은 상태예요. 소재 이미지가 피드에서 멈춰 세울 만큼 강렬한지, "
-                        f"카피가 타겟의 언어로 쓰였는지 점검하세요. "
-                        f"3~5개 소재를 동시 집행하는 A/B 테스트로 최적 소재를 찾는 것을 권장해요."
-                    )
-                if len(ctr_df) >= 3:
-                    if _recent_ctr < _avg_ctr * 0.8:
-                        _ctr_trend_msg = (
-                            f"최근 3일 CTR <b style='color:#E74C3C'>하락 중 ({_recent_ctr:.2f}%)</b> — 소재 피로 신호예요. "
-                            f"동일 타겟에게 같은 소재를 반복 노출하면 CTR이 점점 떨어져요. "
-                            f"소재 교체 주기를 2~3주로 설정하고 새 크리에이티브를 미리 준비하세요."
-                        )
-                    elif _recent_ctr > _avg_ctr * 1.2:
-                        _ctr_trend_msg = (
-                            f"최근 3일 CTR <b style='color:#27AE60'>상승 중 ({_recent_ctr:.2f}%)</b> — 좋은 신호예요. "
-                            f"현재 소재가 잘 먹히고 있어요. 일예산 10~20% 증액으로 모멘텀을 살려보세요."
-                        )
-                    else:
-                        _ctr_trend_msg = f"최근 3일 CTR {_recent_ctr:.2f}% — 안정적으로 유지 중이에요."
-                    _ae_lines.append(f"📣 CTR {_ctr_level} / {_ctr_trend_msg}")
-                else:
-                    _ae_lines.append(f"📣 CTR {_ctr_level}")
-            # ROAS: total_revenue/total_spend 기준 (일별 평균 아님)
-            if total_spend > 0 and total_purchases > 0:
-                _real_roas = overall_roas
-                if _real_roas >= 5:
-                    _roas_detail = (
-                        f"<b style='color:#27AE60'>{_real_roas}배</b> — 매우 우수해요. "
-                        f"원가+플랫폼 수수료(약 30~40%)를 제해도 수익 구간이에요. "
-                        f"이 소재·타겟 조합을 스케일업할 최적 타이밍이에요 — 예산을 주 단위로 20~30%씩 점진적으로 늘려보세요."
-                    )
-                elif _real_roas >= 3:
-                    _roas_detail = (
-                        f"<b style='color:#27AE60'>{_real_roas}배</b> — 수익 구간이에요. "
-                        f"단, 플랫폼 수수료+원가(약 30~40%)를 제한 <b>실수익 ROAS</b>도 함께 계산해보세요. "
-                        f"현재 세팅 유지하면서 예산 증액 테스트 가능해요."
-                    )
-                elif _real_roas >= 2:
-                    _roas_detail = (
-                        f"<b style='color:#F39C12'>{_real_roas}배</b> — 손익분기(3배) 미달이에요. "
-                        f"전환 의향이 높은 재방문자 리타게팅 비중을 높이거나, "
-                        f"번들·세트 구성으로 객단가를 올려 ROAS를 개선해보세요."
-                    )
-                else:
-                    _roas_detail = (
-                        f"<b style='color:#E74C3C'>{_real_roas}배</b> — 광고비 대비 매출 회수가 낮아요. "
-                        f"지금 세팅으로 예산을 늘리면 적자가 심화돼요. "
-                        f"타겟을 구매 이력 유사 타겟(LLA)으로 좁히거나, "
-                        f"'신규 고객 첫 구매 혜택'을 소재에 노출해 전환 트리거를 만드세요."
-                    )
-                _ae_lines.append(f"💰 ROAS {_roas_detail}")
+                _ctr_trend = "📉 최근 CTR 하락 — 소재 피로 신호. 이미지/문구 교체 검토." if _recent_ctr < _avg_ctr*0.8 else ("📈 CTR 상승 중 — 현재 소재 반응 좋음. 예산 증액 고려." if _recent_ctr > _avg_ctr*1.2 else f"CTR 평균 {_avg_ctr:.2f}% 유지 중.")
+                _ae_lines.append(_ctr_trend)
+            if not roas_df.empty:
+                _avg_roas = roas_df["ROAS"].mean()
+                _ae_lines.append(f"💰 평균 ROAS {_avg_roas:.1f}배 — {'수익권 달성. 전환 소재 중심 예산 집중.' if _avg_roas>=3 else '손익분기 미달. 타겟·소재 최적화 후 스케일업.'}")
             elif total_spend > 0:
-                _ae_lines.append(
-                    f"⚠️ <b>전환 미발생</b> — 클릭→구매 전환 병목 구간을 점검하세요. "
-                    f"확인 순서: ① 메타 픽셀 이벤트 정상 수신 여부 → ② GA4 랜딩 페이지 이탈율 → "
-                    f"③ 상품페이지 구매 마찰 요소(배송비 노출 시점·리뷰 수·CTA 버튼). "
-                    f"전환 캠페인보다 트래픽 캠페인으로 먼저 모수를 쌓은 뒤 "
-                    f"리타게팅 전환 캠페인으로 전환하는 2단계 전략을 고려해보세요."
-                )
+                _ae_lines.append("⚠️ 전환 발생 없음 — 클릭→구매 전환 병목 구간 점검 필요. 상품페이지 CTA·리뷰·배송비 노출 확인.")
             if _ae_lines:
                 insight_box(_ae_lines, COLOR["orange"])
         else:
@@ -1090,47 +843,14 @@ with tab1:
         pixel_total = int(nvr_df["신규"].sum())
         latest_ret  = nvr_df["재방문"].iloc[-3:].mean()
         early_ret   = nvr_df["재방문"].iloc[:max(1, len(nvr_df)-7)].mean()
-        _nr_lines   = []
-        if pixel_total >= 1000:
-            _nr_lines.append(
-                f"🎯 <b>누적 픽셀 모수 {pixel_total:,}명</b> — 리타게팅 캠페인을 집행할 충분한 모수가 쌓였어요. "
-                f"메타 광고에서 '웹사이트 방문자(최근 30일)' 맞춤 타겟으로 리타게팅 캠페인을 별도 집행하면 "
-                f"cold 오디언스 대비 전환율이 3~5배 높아요."
-            )
-        elif pixel_total >= 300:
-            _nr_lines.append(
-                f"🎯 <b>누적 픽셀 모수 {pixel_total:,}명</b> — 리타게팅 캠페인 최소 기준(300명)에 도달했어요. "
-                f"신규 방문 후 3~7일 이내 리타게팅이 전환율이 가장 높아요. "
-                f"지금 바로 '웹사이트 방문자' 맞춤 타겟 광고를 설정하세요."
-            )
-        else:
-            _nr_lines.append(
-                f"🎯 <b>누적 픽셀 모수 {pixel_total:,}명</b> — 아직 리타게팅 캠페인 효과가 나기엔 모수가 부족해요(최소 300명 권장). "
-                f"지금은 신규 트래픽 유입에 집중해 모수를 먼저 쌓는 게 중요해요."
-            )
-        if latest_ret > early_ret * 1.2:
-            _nr_lines.append(
-                f"📈 <b>재방문자 증가 추세</b> — 브랜드 인지도가 쌓이는 중이에요. "
-                f"재방문자는 구매 의향이 높은 따뜻한 오디언스예요. "
-                f"이 그룹에게 '한정 재고', '오늘만 혜택' 메시지로 전환을 유도하면 CPO를 크게 낮출 수 있어요."
-            )
-        elif latest_ret < early_ret * 0.8:
-            _nr_lines.append(
-                f"📉 <b>재방문자 감소 추세</b> — 신규 방문 후 재방문으로 이어지지 않는 상황이에요. "
-                f"인스타그램 팔로우 유도, 카카오채널 추가, 이메일 수집 후 뉴스레터 발송 등 "
-                f"재방문을 유도할 락인(Lock-in) 장치가 필요해요."
-            )
-        else:
-            _nr_lines.append(
-                f"➡️ 재방문자 비율 <b>안정적</b> — 꾸준히 돌아오는 방문자가 있어요. "
-                f"이 그룹에게 리타게팅 광고 또는 DM 팔로업으로 첫 구매를 유도해보세요."
-            )
-        if total_purchases == 0 and pixel_total >= 100:
-            _nr_lines.append(
-                f"💡 전환 미발생이지만 모수 {pixel_total:,}명 확보 — "
-                f"'재고 한정·마감 임박' 긴박감 메시지로 지금 리타게팅 집행할 최적 타이밍이에요."
-            )
-        insight_box(_nr_lines, COLOR["purple"])
+        ret_trend   = "📈 재방문자 증가 추세 — 브랜드 인지도 쌓이는 중" if latest_ret > early_ret * 1.2 else ""
+        st.markdown(f"""
+        <div style="background:#F0F9FF;border-left:4px solid {COLOR['blue']};padding:14px 18px;border-radius:8px;font-size:13px;color:#1A1A1A;">
+        📌 <b>누적 픽셀 모수 {pixel_total:,}명</b> — 리타게팅 캠페인이 이 모수 전체를 커버하도록 설정됐는지 확인.
+        신규 방문자는 방문 후 3~7일 내 리타게팅 시 전환율이 cold 대비 3~5배 높음.
+        {"&nbsp;&nbsp;|&nbsp;&nbsp;" + ret_trend if ret_trend else ""}
+        </div>
+        """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1277,10 +997,6 @@ with tab2:
     if df_platform_all.empty:
         st.info("🏬 플랫폼 매출 데이터가 없어요. platform_to_sheets.py로 데이터를 먼저 업로드해 주세요.")
         st.stop()
-
-    # 마지막 갱신 시간 표시
-    from datetime import datetime as _dt
-    st.caption(f"🕐 데이터 기준: {_dt.now().strftime('%Y-%m-%d %H:%M')} 로드 | 🔄 버튼으로 최신 데이터 반영")
 
     # ── 기간 필터 ─────────────────────────────────────────────────
     # 주차 목록 (주차별 필터 옵션)
