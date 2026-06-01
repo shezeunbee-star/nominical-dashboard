@@ -9,21 +9,18 @@
 """
 import sys, os, re
 import openpyxl, xlrd, gspread
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
+from google.oauth2.service_account import Credentials as SACredentials
 from datetime import datetime
 
-TOKEN_FILE     = "/Users/kimeunbee/Documents/지표분석/token.json"
+SA_FILE        = os.path.join(os.path.dirname(os.path.abspath(__file__)), "service_account.json")
 SPREADSHEET_ID = "1y9mZirj81sR2tkkGV_wTzFvJonPdJU-JuErSRDo_73E"
 SHEET_NAME     = "🏬 플랫폼 매출"
 COMMISSION     = 30  # 공통 수수료율 (%)
 
-creds = Credentials.from_authorized_user_file(TOKEN_FILE, [
+creds = SACredentials.from_service_account_file(SA_FILE, scopes=[
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ])
-if creds.expired and creds.refresh_token:
-    creds.refresh(Request())
 gc = gspread.authorize(creds)
 ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
 

@@ -603,20 +603,38 @@ with tab1:
     # KPI 인사이트
     _kpi_lines = []
     if len(df) >= 7:
-        _r7  = df.tail(7); _p7 = df.iloc[-14:-7] if len(df) >= 14 else df.head(7)
+        _r7  = df.tail(7); _p7 = df.iloc[-14:-7] if len(df) >= 14 else df.head(max(1,len(df)-7)]
         _v_r = int(_r7["방문자"].sum()); _v_p = int(_p7["방문자"].sum())
         _s_r = int(_r7["광고비"].sum()); _s_p = int(_p7["광고비"].sum())
         _c_r = int(_r7["구매"].sum());   _c_p = int(_p7["구매"].sum())
+        _rev_r = _r7["매출"].sum(); _rev_p = _p7["매출"].sum()
         _vd = round((_v_r-_v_p)/_v_p*100) if _v_p>0 else 0
         _sd = round((_s_r-_s_p)/_s_p*100) if _s_p>0 else 0
         _cd = _c_r - _c_p
         _arrow = lambda x: ("▲" if x>0 else "▼") + f"{abs(x)}%"
-        _kpi_lines.append(f"📊 지난 7일 vs 이전 7일 — 방문자 {_arrow(_vd)} ({_v_r:,}명) · 광고비 {_arrow(_sd)} ({_s_r:,}원) · 전환 {_c_r}건({'▲' if _cd>0 else '▼'}{abs(_cd)}건)")
+        _vis_comment = (
+            f"방문자가 {abs(_vd)}% 증가했는데 전환이 {'함께 늘었어요' if _cd>0 else '늘지 않았다면 랜딩 경험이나 상품 설득력 점검이 필요해요'}." if _vd>0 else
+            f"방문자가 {abs(_vd)}% 감소했어요. {'광고비도 줄었다면 예산 축소 영향이며,' if _sd<0 else '광고비는 유지됐으므로 소재 반응이 떨어진 것으로'} 새 소재 테스트가 필요해요." if _vd<0 else
+            "방문자 수 큰 변동 없이 안정적이에요."
+        )
+        _kpi_lines.append(f"📊 지난 7일 vs 이전 7일 — 방문자 {_arrow(_vd)} ({_v_r:,}명) · 광고비 {_arrow(_sd)} ({_s_r:,}원) · 전환 {_c_r}건({'▲' if _cd>0 else ('▼' if _cd<0 else '±')}{abs(_cd)}건). {_vis_comment}")
+    # ROAS: 전체 매출/전체 광고비로 정확 계산
     _roas_v = overall_roas
     _new_pct = avg_new_rate
-    if total_purchases > 0:
-        _kpi_lines.append(f"💰 ROAS {_roas_v}배 {'— 손익분기 달성. 예산 증액 검토 가능.' if _roas_v>=3 else '— 손익분기(3배) 미달. 소재·타겟 최적화 선행 필요.'}")
-    _kpi_lines.append(f"👥 신규 {_new_pct}% · 재방문 {100-_new_pct}% — {'신규 비중이 높아 재방문 유도 전략(리타게팅·쿠폰) 병행 필요.' if _new_pct>85 else '재방문 비중 확보 중. 전환 타이밍 집중 공략 가능.'}")
+    _ret_pct = 100 - _new_pct
+    if total_purchases > 0 and total_spend > 0:
+        if _roas_v >= 3:
+            _kpi_lines.append(f"💰 ROAS {_roas_v}배 — 광고비 대비 수익이 나는 구간이에요. 단, 플랫폼 수수료(약 30%)와 원가를 고려한 실수익률도 함께 체크하세요. 현재 소재·타겟 조합을 유지하면서 일예산 10~20% 증액 테스트를 권장해요.")
+        elif _roas_v >= 2:
+            _kpi_lines.append(f"💰 ROAS {_roas_v}배 — 손익분기(3배)에 근접했지만 아직 미달이에요. 클릭 후 구매까지 이어지지 않는 구간(장바구니 이탈, 결제 직전 이탈)을 GA4 퍼널로 확인하고, 이탈 시점에 맞는 리타게팅 메시지를 추가하면 전환율을 높일 수 있어요.")
+        else:
+            _kpi_lines.append(f"💰 ROAS {_roas_v}배 — 광고비 대비 매출 회수가 낮아요. 타겟 오디언스가 실제 구매층과 일치하는지 점검하고, 현재 소재를 구매 전환에 특화된 메시지(한정 수량·할인 종료 임박)로 교체해보세요.")
+    if _new_pct > 85:
+        _kpi_lines.append(f"👥 신규 {_new_pct}% · 재방문 {_ret_pct}% — 신규 방문 비중이 압도적으로 높아요. 이는 브랜드 인지가 아직 쌓이지 않았다는 의미로, 재방문율을 높이려면 팔로우 유도 콘텐츠, 첫 구매 쿠폰, 카카오채널 추가 등 락인 장치가 필요해요.")
+    elif _ret_pct >= 20:
+        _kpi_lines.append(f"👥 신규 {_new_pct}% · 재방문 {_ret_pct}% — 재방문 비중이 {_ret_pct}%로 양호해요. 재방문자는 구매 의향이 높은 잠재 고객이에요. 이 그룹에게 '한정 재고', '오늘만 혜택' 메시지로 전환을 유도하면 CPO를 크게 낮출 수 있어요.")
+    else:
+        _kpi_lines.append(f"👥 신규 {_new_pct}% · 재방문 {_ret_pct}% — 재방문자가 적어 브랜드 충성도 형성이 초기 단계예요. 인스타그램 스토리 리타게팅과 메타 맞춤 타겟(웹사이트 방문자)을 활용하면 재방문율을 끌어올릴 수 있어요.")
     if _kpi_lines:
         insight_box(_kpi_lines, "#4F8EF7")
 
