@@ -18,13 +18,16 @@ COMMISSION_DEFAULT = 30
 COMMISSION_CAFE24   = 3   # PG 수수료만 (자사몰)
 API_VERSION    = "2026-03-01"
 
-# 무신사 market_id (연동 주문 확인 후 업데이트)
-MUSINSA_MARKET_IDS = {"musinsa"}  # 실제 market_id 확인됨 (소문자)
+# Cafe24 연동 마켓 market_id 매핑
+MARKET_PLATFORM_MAP = {
+    "musinsa":  "무신사",   # 무신사
+    "zigzag":   "지그재그", # 지그재그 (카카오스타일)
+}
+# 위 목록 외: self, NCHECKOUT 등 → 자사몰(Cafe24)
 
 def market_to_platform(market_id):
-    if market_id in MUSINSA_MARKET_IDS:
-        return "무신사"
-    return "Cafe24"  # self, NCHECKOUT 등 자사몰 계열
+    mid = (market_id or "").lower().strip()
+    return MARKET_PLATFORM_MAP.get(mid, "Cafe24")
 
 # ── 토큰 관리 ─────────────────────────────────────────────────────
 def get_token():

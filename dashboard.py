@@ -58,6 +58,7 @@ PLATFORM_COLORS = {
     "SI Village": "#C8A951",   # 신세계 골드
     "무신사":     "#222222",   # 무신사 블랙
     "Cafe24":     "#4ECBA0",   # 그린
+    "지그재그":   "#FF9900",   # 지그재그 오렌지
 }
 
 st.set_page_config(
@@ -1103,7 +1104,7 @@ with tab2:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 플랫폼별 미니 카드 ────────────────────────────────────────
-    platforms_avail = [p for p in ["29CM", "W컨셉", "SSF", "SI Village", "무신사", "Cafe24"]
+    platforms_avail = [p for p in ["29CM", "W컨셉", "SSF", "SI Village", "무신사", "지그재그", "Cafe24"]
                        if p in pf_normal["플랫폼"].values]
     if platforms_avail:
         pf_cols = st.columns(len(platforms_avail))
@@ -1506,8 +1507,8 @@ with tab3:
                     ).reset_index().sort_values("매출", ascending=False)
                     t3_pf["수익률(%)"] = (t3_pf["실수익"] / t3_pf["매출"] * 100).round(1)
                     t3_pf["객단가"]    = (t3_pf["매출"] / t3_pf["주문수"]).astype(int)
-                    comm_map = {"Cafe24": "3% (PG)", "무신사": "30%", "29CM": "30%",
-                                "W컨셉": "30%", "SSF": "30%", "SI Village": "30%"}
+                    comm_map = {"Cafe24": "3% (PG)", "무신사": "30%", "지그재그": "30%",
+                                "29CM": "30%", "W컨셉": "30%", "SSF": "30%", "SI Village": "30%"}
                     t3_pf["수수료"]    = t3_pf["플랫폼"].map(lambda x: comm_map.get(x, "30%"))
                     t3_pf["매출"]      = t3_pf["매출"].apply(lambda x: f"{int(x):,}원")
                     t3_pf["실수익"]    = t3_pf["실수익"].apply(lambda x: f"{int(x):,}원")
