@@ -1196,8 +1196,8 @@ with tab2:
                     y=_trend_merged["자사몰_매출"],
                     name="자사몰",
                     mode="lines+markers",
-                    line=dict(color="#4F86F7", width=2, dash="dot"),
-                    marker=dict(size=5, color="#4F86F7"),
+                    line=dict(color="#00BCD4", width=2, dash="dot"),  # 자사몰: 시안(청록) — 플랫폼 색과 구분
+                    marker=dict(size=5, color="#00BCD4"),
                     hovertemplate="<b>%{x|%Y-%m-%d}</b><br>자사몰: %{y:,}원<extra></extra>",
                 ))
             # 총 합계 라인 (굵게 강조 + 면적)
@@ -1207,10 +1207,10 @@ with tab2:
                     y=_trend_merged["총_매출"],
                     name="총 합계",
                     mode="lines+markers",
-                    line=dict(color="#1A1A2E", width=3),
-                    marker=dict(size=6, color="#1A1A2E", line=dict(color="white", width=1.5)),
+                    line=dict(color="#FF6B35", width=3),   # 총합계: 주황 — 무신사 블랙·29CM 레드와 구분
+                    marker=dict(size=6, color="#FF6B35", line=dict(color="white", width=1.5)),
                     fill="tozeroy",
-                    fillcolor="rgba(26,26,46,0.04)",
+                    fillcolor="rgba(255,107,53,0.05)",
                     hovertemplate="<b>%{x|%Y-%m-%d}</b><br>총 합계: %{y:,}원<extra></extra>",
                 ))
                 # 7일 이동평균 (총 합계, 7일 이상 데이터 시)
@@ -1221,7 +1221,7 @@ with tab2:
                         y=_ma7,
                         name="7일 MA",
                         mode="lines",
-                        line=dict(color="#E74C3C", width=1.5, dash="dash"),
+                        line=dict(color="#9E9E9E", width=1.5, dash="dash"),  # 7일 MA: 중간 회색 — 보조선
                         hovertemplate="<b>%{x|%Y-%m-%d}</b><br>7일 MA: %{y:,.0f}원<extra></extra>",
                     ))
             fig_t.update_layout(
