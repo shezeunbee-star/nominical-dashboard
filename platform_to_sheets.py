@@ -124,24 +124,49 @@ def parse_29cm(filepath):
     return rows
 
 def parse_wconcept(filepath):
+    """
+    W컨셉 상품준비중내역 - 구버전(31컬럼) / 신버전(32컬럼) 자동 감지
+    구버전: [10]상품코드 [11]상품명 [12]옵션1 [13]옵션2 [15]수량 [18]판매가 [23]취소사유 [29]스타일코드
+    신버전: [10]대표상품코드 [11]상품코드 [12]상품명 [13]옵션1 [14]옵션2 [16]수량 [19]판매가 [24]취소사유 [30]스타일코드
+    """
     print(f"  📦 W컨셉 파싱: {os.path.basename(filepath)}")
     wb = openpyxl.load_workbook(filepath)
     ws_f = wb.active
+    all_rows = list(ws_f.iter_rows(values_only=True))
+    if not all_rows:
+        return []
+
+    # 헤더로 버전 감지
+    header = all_rows[0]
+    new_fmt = len(header) >= 32 and str(header[10]).strip() == "대표상품코드"
+    if new_fmt:
+        # 신버전 (32컬럼)
+        i_name, i_color, i_size, i_qty, i_price, i_cancel, i_code, i_base = 12, 13, 14, 16, 19, 24, 30, 10
+    else:
+        # 구버전 (31컬럼)
+        i_name, i_color, i_size, i_qty, i_price, i_cancel, i_code, i_base = 11, 12, 13, 15, 18, 23, 29, 10
+
     rows = []
-    for i, row in enumerate(ws_f.iter_rows(values_only=True)):
+    for i, row in enumerate(all_rows):
         if i == 0: continue
-        if not row[11]: continue
-        color  = str(row[12]) if row[12] else "-"
-        size   = str(row[13]) if row[13] else "-"
-        qty    = int(row[15]) if row[15] else 1
-        price  = int(row[18]) if row[18] else 0
+        if not row[i_name]: continue
+        color  = str(row[i_color]) if row[i_color] else "-"
+        size   = str(row[i_size])  if row[i_size]  else "-"
+        try:
+            qty = int(row[i_qty]) if row[i_qty] else 1
+        except (ValueError, TypeError):
+            qty = 1
+        try:
+            price = int(row[i_price]) if row[i_price] else 0
+        except (ValueError, TypeError):
+            price = 0
         total  = price * qty
         profit = round(total * (1 - COMMISSION / 100))
-        status = "취소" if row[23] else "정상"
-        code   = str(row[29]) if row[29] else str(row[10])
+        status = "취소" if row[i_cancel] else "정상"
+        code   = str(row[i_code]) if row[i_code] else str(row[i_base])
         rows.append([
             "W컨셉", fmt_date(row[0]),
-            str(row[11]), code,
+            str(row[i_name]), code,
             color, size, qty, total,
             COMMISSION, profit, status
         ])
