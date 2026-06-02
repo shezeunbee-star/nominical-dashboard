@@ -975,10 +975,12 @@ with tab1:
         yaxis="y3",
     ), secondary_y=False)
     conv_df = df[df["구매"] > 0].copy()
+    # 날짜_dt → YYYY-MM-DD (Meta API 날짜 형식과 통일)
+    conv_df["날짜_key"] = conv_df["날짜_dt"].dt.strftime("%Y-%m-%d")
 
     # ── 전환 발생일 소재 annotation ─────────────────────────────
     _daily_cr = load_meta_daily_creative("last_30d")
-    # 날짜별 소재 그룹핑
+    # 날짜별 소재 그룹핑 (키: YYYY-MM-DD)
     _cr_by_date = {}
     if not _daily_cr.empty:
         for _d, _grp in _daily_cr.groupby("날짜"):
@@ -987,7 +989,7 @@ with tab1:
     # 전환 발생일별 호버 텍스트 및 annotation 라벨 구성
     _hover_texts = []
     for _, _row in conv_df.iterrows():
-        _date_key = str(_row["날짜"])
+        _date_key = str(_row["날짜_key"])  # YYYY-MM-DD
         _total_conv = int(_row["구매"])
 
         # ① 유입 경로 (GA4 채널 데이터)
@@ -1031,7 +1033,7 @@ with tab1:
     # annotation 라벨 (점 위 텍스트)
     if not conv_df.empty:
         for _, _row in conv_df.iterrows():
-            _date_key = str(_row["날짜"])
+            _date_key = str(_row["날짜_key"])  # YYYY-MM-DD
             _vis = _row["방문자"]
             if _date_key in _cr_by_date:
                 _top = _cr_by_date[_date_key].iloc[0]
