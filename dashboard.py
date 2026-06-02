@@ -443,7 +443,7 @@ IG_ACCOUNTS = {
         "color": "#C13584",
     },
     "nominical_official (공식)": {
-        "token": "",   # 토큰 추가 예정
+        "token": "IGAAfKtJZBiU09BZAFlOVHhQSWxnS1UwdDRweVFOSWMzcVU0eHdNV29EX0tadkZACeXlFNFlKUVpkcGZABMllnQVNQRzd5NEFYSXFXS2VWZAXJXMG1sajRQZAGN0YlhvalNfNmJ2UVVWSVlPYU5YUmFoQU40OXZAtblVsN0VIYmFiWU0zbwZDZD",
         "ig_id": "17841465777820020",
         "color": "#1A1A2E",
     },
