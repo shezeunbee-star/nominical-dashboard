@@ -974,41 +974,73 @@ with tab1:
         hovertemplate="<b>%{x}</b><br>광고비: %{y:,}원<extra></extra>",
         yaxis="y3",
     ), secondary_y=False)
-    conv_df = df[df["구매"] > 0]
+    conv_df = df[df["구매"] > 0].copy()
+
+    # ── 전환 발생일 소재 annotation ─────────────────────────────
+    _daily_cr = load_meta_daily_creative("last_30d")
+    # 날짜별 소재 그룹핑
+    _cr_by_date = {}
+    if not _daily_cr.empty:
+        for _d, _grp in _daily_cr.groupby("날짜"):
+            _cr_by_date[_d] = _grp.sort_values("전환수", ascending=False)
+
+    # 전환 발생일별 호버 텍스트 및 annotation 라벨 구성
+    _hover_texts = []
+    for _, _row in conv_df.iterrows():
+        _date_key = str(_row["날짜"])
+        _total_conv = int(_row["구매"])
+
+        # ① 유입 경로 (GA4 채널 데이터)
+        _ch_lines = []
+        _ch_pairs = [
+            ("메타광고", _row.get("유입_메타", 0)),
+            ("공식 인스타", _row.get("유입_공식", 0)),
+            ("개인 인스타", _row.get("유입_개인", 0)),
+            ("직접 방문", _row.get("유입_직접", 0)),
+        ]
+        for _ch, _v in sorted(_ch_pairs, key=lambda x: -x[1]):
+            if _v > 0:
+                _ch_lines.append(f"  {_ch}: {int(_v)}명")
+
+        # ② 전환 소재 (Meta daily breakdown)
+        _cr_lines = []
+        if _date_key in _cr_by_date:
+            for _i, (_, _cr) in enumerate(_cr_by_date[_date_key].head(5).iterrows(), 1):
+                _cr_lines.append(f"  {_i}위. {str(_cr['소재명'])[:30]} ({int(_cr['전환수'])}건)")
+
+        # 호버 HTML 조립
+        _ht = f"<b>📅 {_date_key} · 전환 {_total_conv}건</b>"
+        if _ch_lines:
+            _ht += "<br><br><b>유입 경로</b><br>" + "<br>".join(_ch_lines)
+        if _cr_lines:
+            _ht += "<br><br><b>전환 소재 (Meta)</b><br>" + "<br>".join(_cr_lines)
+        elif not _cr_lines and not _daily_cr.empty:
+            _ht += "<br><br><i style='color:#999'>Meta 소재 데이터 없음 (자연유입)</i>"
+        _hover_texts.append(_ht)
+
     fig1.add_trace(go.Scatter(
         x=conv_df["날짜"], y=conv_df["방문자"],
         name="전환 발생",
         mode="markers",
         marker=dict(symbol="circle", size=12, color=COLOR["green"],
                     line=dict(color="white", width=2)),
-        hovertemplate="<b>%{x}</b><br>전환 %{customdata}건<extra></extra>",
-        customdata=conv_df["구매"].astype(int),
+        text=_hover_texts,
+        hovertemplate="%{text}<extra></extra>",
     ), secondary_y=False)
 
-    # ── 전환 발생일 소재 annotation ─────────────────────────────
-    _daily_cr = load_meta_daily_creative("last_30d")
-    if not _daily_cr.empty and not conv_df.empty:
-        # 날짜별 top 소재 정리
-        _cr_by_date = (
-            _daily_cr.sort_values("전환수", ascending=False)
-            .groupby("날짜").first().reset_index()
-        )
-        _cr_map = dict(zip(_cr_by_date["날짜"], zip(_cr_by_date["소재명"], _cr_by_date["전환수"])))
-        # 날짜별 총 소재 수
-        _cr_cnt = _daily_cr.groupby("날짜")["소재명"].count().to_dict()
-
+    # annotation 라벨 (점 위 텍스트)
+    if not conv_df.empty:
         for _, _row in conv_df.iterrows():
             _date_key = str(_row["날짜"])
             _vis = _row["방문자"]
-            if _date_key in _cr_map:
-                _top_name, _top_conv = _cr_map[_date_key]
-                _n_others = _cr_cnt.get(_date_key, 1) - 1
-                _label = f"Meta · {_top_name[:18]}{'…' if len(_top_name)>18 else ''}"
+            if _date_key in _cr_by_date:
+                _top = _cr_by_date[_date_key].iloc[0]
+                _n_others = len(_cr_by_date[_date_key]) - 1
+                _label = f"Meta · {str(_top['소재명'])[:18]}{'…' if len(str(_top['소재명']))>18 else ''}"
                 if _n_others > 0:
                     _label += f" 외 {_n_others}개"
-                _label += f" ({int(_top_conv)}건)"
+                _label += f" ({int(_top['전환수'])}건)"
             else:
-                # Meta 외 경로 (자연유입 등)
                 _label = f"전환 {int(_row['구매'])}건"
             fig1.add_annotation(
                 x=_date_key, y=_vis,
@@ -1019,8 +1051,7 @@ with tab1:
                 font=dict(size=10, color="#1A6B35"),
                 bgcolor="rgba(39,174,96,0.08)",
                 bordercolor="#27AE60",
-                borderwidth=1,
-                borderpad=3,
+                borderwidth=1, borderpad=3,
                 align="center",
             )
 
