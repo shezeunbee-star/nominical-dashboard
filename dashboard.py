@@ -1312,45 +1312,48 @@ with tab1:
             )
             st.plotly_chart(_fig_cr, use_container_width=True)
 
-        # ── 전체 소재 상세 지표 테이블 ──────────────────────────
+        # ── 전체 소재 상세 지표 테이블 (썸네일 인라인) ─────────────
         st.markdown("<br>", unsafe_allow_html=True)
         chart_container("전체 소재 상세 지표", "라이브 중인 모든 소재 — 캠페인 > 광고세트 > 소재명")
-        _disp_all = df_ads[["전체경로", "광고비", "노출수", "클릭수", "CTR", "전환수", "CPO", "ROAS", "매출"]].copy()
-        _disp_all.columns = ["캠페인 > 광고세트 > 소재명", "광고비", "노출", "클릭", "CTR(%)", "전환", "CPO", "ROAS", "매출"]
-        _disp_all["광고비"] = _disp_all["광고비"].apply(lambda x: f"{int(x):,}원")
-        _disp_all["노출"]   = _disp_all["노출"].apply(lambda x: f"{int(x):,}")
-        _disp_all["클릭"]   = _disp_all["클릭"].apply(lambda x: f"{int(x):,}")
-        _disp_all["CTR(%)"] = _disp_all["CTR(%)"].apply(lambda x: f"{x:.2f}%")
-        _disp_all["CPO"]    = _disp_all["CPO"].apply(lambda x: f"{int(x):,}원" if x > 0 else "—")
-        _disp_all["ROAS"]   = _disp_all["ROAS"].apply(lambda x: f"{x}배" if x > 0 else "—")
-        _disp_all["매출"]   = _disp_all["매출"].apply(lambda x: f"{int(x):,}원")
-        st.dataframe(_disp_all, use_container_width=True, hide_index=True)
 
-        # ── 소재 카드 그리드 (썸네일 + 핵심 지표) ────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-        chart_container("소재 카드", "썸네일 · 전환 · CPO · ROAS")
+        _thumb_map = dict(zip(df_ads["ad_id"], df_ads["thumbnail"]))
 
-        _card_ads = df_ads[df_ads["thumbnail"] != ""].head(12)
-        if _card_ads.empty:
-            st.caption("썸네일을 불러올 수 없어요. Meta 광고 계정의 크리에이티브 접근 권한을 확인해 주세요.")
-        else:
-            _cols_per_row = 6
-            for _row_start in range(0, len(_card_ads), _cols_per_row):
-                _row_ads = _card_ads.iloc[_row_start:_row_start + _cols_per_row]
-                _card_cols = st.columns(_cols_per_row)
-                for _ci, (_, _ad) in enumerate(zip(_card_cols, _row_ads.itertuples())):
-                    with _card_cols[_ci]:
-                        _conv_color = "#27AE60" if _ad.전환수 > 0 else "#BDC3C7"
-                        _name_short = str(_ad.소재명)[:18] + "…" if len(str(_ad.소재명)) > 18 else str(_ad.소재명)
-                        st.markdown(
-                            f"""<div style="border:1px solid #E8E8E8;border-radius:8px;padding:7px;margin-bottom:6px;background:#FAFAFA;">
-                            <img src="{_ad.thumbnail}" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:4px;display:block;" onerror="this.style.display='none'">
-                            <div style="font-size:10px;color:#666;margin-top:5px;line-height:1.3;word-break:break-all;">{_name_short}</div>
-                            <div style="font-size:11px;font-weight:700;color:{_conv_color};margin-top:3px;">전환 {_ad.전환수}건</div>
-                            <div style="font-size:10px;color:#999;">CPO {f'{_ad.CPO:,}원' if _ad.CPO > 0 else '—'} · ROAS {_ad.ROAS}배</div>
-                            </div>""",
-                            unsafe_allow_html=True,
-                        )
+        _th = lambda t: f"<th style='padding:8px 10px;background:#F7F7F7;font-size:12px;font-weight:600;color:#555;border-bottom:2px solid #E8E8E8;white-space:nowrap;text-align:left;'>{t}</th>"
+        _td = lambda v, align="right": f"<td style='padding:7px 10px;font-size:12px;color:#1A1A1A;border-bottom:1px solid #F0F0F0;text-align:{align};white-space:nowrap;'>{v}</td>"
+
+        _rows_html = ""
+        for _, _r in df_ads.iterrows():
+            _thumb_html = (
+                f"<img src='{_r['thumbnail']}' style='width:44px;height:44px;object-fit:cover;border-radius:5px;display:block;' onerror=\"this.replaceWith(document.createTextNode('—'))\">"
+                if _r["thumbnail"] else "<span style='color:#CCC;font-size:11px;'>—</span>"
+            )
+            _conv_c = "#27AE60" if _r["전환수"] > 0 else "#999"
+            _full   = str(_r["전체경로"])
+            _rows_html += f"""<tr>
+                <td style='padding:6px 10px;border-bottom:1px solid #F0F0F0;'>{_thumb_html}</td>
+                <td style='padding:7px 10px;font-size:11px;color:#333;border-bottom:1px solid #F0F0F0;max-width:300px;line-height:1.4;'>{_full}</td>
+                {_td(f"{int(_r['광고비']):,}원")}
+                {_td(f"{int(_r['노출수']):,}")}
+                {_td(f"{int(_r['클릭수']):,}")}
+                {_td(f"{_r['CTR']:.2f}%")}
+                <td style='padding:7px 10px;font-size:12px;font-weight:700;color:{_conv_c};border-bottom:1px solid #F0F0F0;text-align:right;'>{int(_r['전환수'])}건</td>
+                {_td(f"{int(_r['CPO']):,}원" if _r['CPO'] > 0 else "—")}
+                {_td(f"{_r['ROAS']}배" if _r['ROAS'] > 0 else "—")}
+                {_td(f"{int(_r['매출']):,}원")}
+            </tr>"""
+
+        _table_html = f"""
+        <div style='overflow-x:auto;'>
+        <table style='width:100%;border-collapse:collapse;'>
+            <thead><tr>
+                {_th('썸네일')}{_th('캠페인 > 광고세트 > 소재명')}
+                {_th('광고비')}{_th('노출')}{_th('클릭')}{_th('CTR')}
+                {_th('전환')}{_th('CPO')}{_th('ROAS')}{_th('매출')}
+            </tr></thead>
+            <tbody>{_rows_html}</tbody>
+        </table>
+        </div>"""
+        st.markdown(_table_html, unsafe_allow_html=True)
 
         # ── 소재 인사이트 ────────────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
