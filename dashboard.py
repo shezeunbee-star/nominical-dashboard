@@ -460,7 +460,7 @@ def update_ga4_yesterday():
         row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
         if not row_idx:
             # 날짜 행이 없으면 새 행 추가
-            ws.append_row([day_label], value_input_option="USER_ENTERED")
+            ws.append_row([day_label], value_input_option="RAW")
             all_dates = ws.col_values(1)
             row_idx = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
         if not row_idx:
@@ -536,7 +536,7 @@ def update_meta_yesterday():
         row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
         if not row_idx:
             # 날짜 행이 없으면 새 행 추가
-            ws.append_row([day_label], value_input_option="USER_ENTERED")
+            ws.append_row([day_label], value_input_option="RAW")
             all_dates = ws.col_values(1)
             row_idx = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
         if not row_idx:
