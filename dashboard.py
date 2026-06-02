@@ -305,7 +305,7 @@ def load_meta_ad_insights(date_preset="last_30d"):
             f"https://graph.facebook.com/v25.0/{AD_ACCOUNT}/insights",
             params={
                 "level": "ad",
-                "fields": "ad_id,ad_name,spend,impressions,clicks,ctr,actions,purchase_roas",
+                "fields": "ad_id,ad_name,adset_name,campaign_name,spend,impressions,clicks,ctr,actions,purchase_roas",
                 "date_preset": date_preset,
                 "limit": 100,
                 "access_token": meta_token,
@@ -334,10 +334,18 @@ def load_meta_ad_insights(date_preset="last_30d"):
             cpo    = round(spend / purchases) if purchases > 0 else 0
             roas   = round(revenue / spend, 1) if spend > 0 else 0
 
+            _campaign = d.get("campaign_name", "")
+            _adset    = d.get("adset_name", "")
+            _adname   = d.get("ad_name", "-")
+            _full_name = f"{_campaign} > {_adset} > {_adname}"
+
             rows.append({
-                "ad_id": d.get("ad_id", ""),
-                "광고명":  d.get("ad_name", "-"),
-                "광고비":  spend,
+                "ad_id":    d.get("ad_id", ""),
+                "캠페인":   _campaign,
+                "광고세트": _adset,
+                "소재명":   _adname,
+                "전체경로": _full_name,
+                "광고비":   spend,
                 "노출수":  imps,
                 "클릭수":  clicks,
                 "CTR":    ctr,
@@ -1280,44 +1288,43 @@ with tab1:
         st.markdown("<br>", unsafe_allow_html=True)
 
         # ── 전환수 TOP 차트 ──────────────────────────────────────
-        _top = df_ads[df_ads["전환수"] > 0].head(10).copy()
-        _top["광고명_short"] = _top["광고명"].apply(lambda x: x[:30] + "…" if len(str(x)) > 30 else str(x))
+        _top_chart = df_ads[df_ads["전환수"] > 0].head(10).copy()
+        _top_chart["소재명_short"] = _top_chart["소재명"].apply(lambda x: x[:25] + "…" if len(str(x)) > 25 else str(x))
 
-        if not _top.empty:
-            _col_ch, _col_tb = st.columns([2, 3])
-            with _col_ch:
-                chart_container("전환 발생 소재 TOP 10", "전환수 기준 상위 소재")
-                _top_sorted = _top.sort_values("전환수")
-                _fig_cr = go.Figure(go.Bar(
-                    x=_top_sorted["전환수"],
-                    y=_top_sorted["광고명_short"],
-                    orientation="h",
-                    marker_color=COLOR["green"],
-                    text=_top_sorted["전환수"].astype(str) + "건",
-                    textposition="outside",
-                    hovertemplate="<b>%{y}</b><br>전환: %{x}건<extra></extra>",
-                ))
-                _fig_cr.update_layout(
-                    height=max(250, len(_top) * 36),
-                    margin=dict(l=0, r=60, t=10, b=0),
-                    plot_bgcolor="white", paper_bgcolor="white",
-                    xaxis=dict(showgrid=True, gridcolor="#F0F0F0"),
-                    yaxis=dict(showgrid=False, tickfont=dict(size=11)),
-                )
-                st.plotly_chart(_fig_cr, use_container_width=True)
+        if not _top_chart.empty:
+            chart_container("전환 발생 소재 TOP 10", "전환수 기준 상위 소재")
+            _top_sorted = _top_chart.sort_values("전환수")
+            _fig_cr = go.Figure(go.Bar(
+                x=_top_sorted["전환수"],
+                y=_top_sorted["소재명_short"],
+                orientation="h",
+                marker_color=COLOR["green"],
+                text=_top_sorted["전환수"].astype(str) + "건",
+                textposition="outside",
+                hovertemplate="<b>%{y}</b><br>전환: %{x}건<extra></extra>",
+            ))
+            _fig_cr.update_layout(
+                height=max(220, len(_top_chart) * 34),
+                margin=dict(l=0, r=60, t=10, b=0),
+                plot_bgcolor="white", paper_bgcolor="white",
+                xaxis=dict(showgrid=True, gridcolor="#F0F0F0"),
+                yaxis=dict(showgrid=False, tickfont=dict(size=11)),
+            )
+            st.plotly_chart(_fig_cr, use_container_width=True)
 
-            with _col_tb:
-                chart_container("소재별 상세 지표", "CPO·ROAS·CTR 비교")
-                _disp = _top[["광고명_short", "광고비", "클릭수", "CTR", "전환수", "CPO", "ROAS", "매출"]].copy()
-                _disp.columns = ["소재명", "광고비", "클릭", "CTR(%)", "전환", "CPO", "ROAS", "매출"]
-                _disp["광고비"] = _disp["광고비"].apply(lambda x: f"{x:,}원")
-                _disp["CPO"]   = _disp["CPO"].apply(lambda x: f"{x:,}원" if x > 0 else "—")
-                _disp["매출"]  = _disp["매출"].apply(lambda x: f"{x:,}원")
-                _disp["ROAS"]  = _disp["ROAS"].apply(lambda x: f"{x}배")
-                _disp["CTR(%)"] = _disp["CTR(%)"].apply(lambda x: f"{x:.2f}%")
-                st.dataframe(_disp, use_container_width=True, hide_index=True)
-        else:
-            st.info(f"{_creative_preset} 기간에 전환이 발생한 소재가 없어요.")
+        # ── 전체 소재 상세 지표 테이블 ──────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        chart_container("전체 소재 상세 지표", "라이브 중인 모든 소재 — 캠페인 > 광고세트 > 소재명")
+        _disp_all = df_ads[["전체경로", "광고비", "노출수", "클릭수", "CTR", "전환수", "CPO", "ROAS", "매출"]].copy()
+        _disp_all.columns = ["캠페인 > 광고세트 > 소재명", "광고비", "노출", "클릭", "CTR(%)", "전환", "CPO", "ROAS", "매출"]
+        _disp_all["광고비"] = _disp_all["광고비"].apply(lambda x: f"{int(x):,}원")
+        _disp_all["노출"]   = _disp_all["노출"].apply(lambda x: f"{int(x):,}")
+        _disp_all["클릭"]   = _disp_all["클릭"].apply(lambda x: f"{int(x):,}")
+        _disp_all["CTR(%)"] = _disp_all["CTR(%)"].apply(lambda x: f"{x:.2f}%")
+        _disp_all["CPO"]    = _disp_all["CPO"].apply(lambda x: f"{int(x):,}원" if x > 0 else "—")
+        _disp_all["ROAS"]   = _disp_all["ROAS"].apply(lambda x: f"{x}배" if x > 0 else "—")
+        _disp_all["매출"]   = _disp_all["매출"].apply(lambda x: f"{int(x):,}원")
+        st.dataframe(_disp_all, use_container_width=True, hide_index=True)
 
         # ── 소재 카드 그리드 (썸네일 + 핵심 지표) ────────────────
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1327,26 +1334,20 @@ with tab1:
         if _card_ads.empty:
             st.caption("썸네일을 불러올 수 없어요. Meta 광고 계정의 크리에이티브 접근 권한을 확인해 주세요.")
         else:
-            _cols_per_row = 4
+            _cols_per_row = 6
             for _row_start in range(0, len(_card_ads), _cols_per_row):
                 _row_ads = _card_ads.iloc[_row_start:_row_start + _cols_per_row]
                 _card_cols = st.columns(_cols_per_row)
                 for _ci, (_, _ad) in enumerate(zip(_card_cols, _row_ads.itertuples())):
                     with _card_cols[_ci]:
                         _conv_color = "#27AE60" if _ad.전환수 > 0 else "#BDC3C7"
-                        _name_short = str(_ad.광고명)[:28] + "…" if len(str(_ad.광고명)) > 28 else str(_ad.광고명)
+                        _name_short = str(_ad.소재명)[:18] + "…" if len(str(_ad.소재명)) > 18 else str(_ad.소재명)
                         st.markdown(
-                            f"""<div style="border:1px solid #E8E8E8;border-radius:10px;padding:10px;margin-bottom:8px;background:#FAFAFA;">
-                            <img src="{_ad.thumbnail}" style="width:100%;border-radius:6px;margin-bottom:8px;" onerror="this.style.display='none'">
-                            <div style="font-size:11px;color:#555;margin-bottom:6px;line-height:1.3;">{_name_short}</div>
-                            <div style="display:flex;justify-content:space-between;font-size:12px;">
-                                <span style="color:{_conv_color};font-weight:700;">전환 {_ad.전환수}건</span>
-                                <span style="color:#888;">ROAS {_ad.ROAS}배</span>
-                            </div>
-                            <div style="display:flex;justify-content:space-between;font-size:11px;color:#999;margin-top:4px;">
-                                <span>CPO {f'{_ad.CPO:,}원' if _ad.CPO > 0 else '—'}</span>
-                                <span>CTR {_ad.CTR:.2f}%</span>
-                            </div>
+                            f"""<div style="border:1px solid #E8E8E8;border-radius:8px;padding:7px;margin-bottom:6px;background:#FAFAFA;">
+                            <img src="{_ad.thumbnail}" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:4px;display:block;" onerror="this.style.display='none'">
+                            <div style="font-size:10px;color:#666;margin-top:5px;line-height:1.3;word-break:break-all;">{_name_short}</div>
+                            <div style="font-size:11px;font-weight:700;color:{_conv_color};margin-top:3px;">전환 {_ad.전환수}건</div>
+                            <div style="font-size:10px;color:#999;">CPO {f'{_ad.CPO:,}원' if _ad.CPO > 0 else '—'} · ROAS {_ad.ROAS}배</div>
                             </div>""",
                             unsafe_allow_html=True,
                         )
@@ -1355,7 +1356,7 @@ with tab1:
         st.markdown("<br>", unsafe_allow_html=True)
         if not df_ads.empty and _total_conv > 0:
             _best = df_ads[df_ads["전환수"] == df_ads["전환수"].max()].iloc[0]
-            _best_name = str(_best["광고명"])[:35]
+            _best_name = str(_best["소재명"])[:35]
             _worst_spend = df_ads[(df_ads["광고비"] > 0) & (df_ads["전환수"] == 0)]
             _insight_lines = [
                 f"🏆 <b>전환 1위 소재</b>: {_best_name} — 전환 {int(_best['전환수'])}건 · CPO {int(_best['CPO']):,}원 · ROAS {_best['ROAS']}배. "
