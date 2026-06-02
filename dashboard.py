@@ -385,6 +385,56 @@ def load_meta_ad_insights(date_preset="last_30d"):
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=3600)
+def load_meta_daily_creative(date_preset="last_30d"):
+    """날짜별 소재(Ad) 전환 데이터. 차트 annotation용. TTL=1시간."""
+    try:
+        meta_token = None
+        for key in ("meta_access_token", "META_ACCESS_TOKEN", "meta_token"):
+            try:
+                meta_token = st.secrets[key]
+                if meta_token: break
+            except Exception: pass
+        if not meta_token:
+            _tf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta_token.txt")
+            if os.path.exists(_tf):
+                meta_token = open(_tf).read().strip()
+        if not meta_token:
+            return pd.DataFrame()
+
+        resp = _requests.get(
+            f"https://graph.facebook.com/v25.0/act_1599099620677018/insights",
+            params={
+                "level": "ad",
+                "fields": "ad_name,actions,spend",
+                "date_preset": date_preset,
+                "time_increment": 1,   # 일별 분해
+                "limit": 500,
+                "access_token": meta_token,
+            },
+            timeout=20,
+        ).json()
+
+        rows = []
+        for d in resp.get("data", []):
+            _actions = {a["action_type"]: int(float(a["value"])) for a in d.get("actions", [])}
+            purchases = (
+                _actions.get("omni_purchase")
+                or _actions.get("offsite_conversion.fb_pixel_purchase")
+                or _actions.get("purchase") or 0
+            )
+            if purchases > 0:
+                rows.append({
+                    "날짜":   d.get("date_start", ""),
+                    "소재명": d.get("ad_name", "-"),
+                    "전환수": purchases,
+                    "광고비": round(float(d.get("spend", 0))),
+                })
+        return pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame()
+
+
 # ── 데이터 로드: 플랫폼 매출 ────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_platform_data():
@@ -934,8 +984,48 @@ with tab1:
         hovertemplate="<b>%{x}</b><br>전환 %{customdata}건<extra></extra>",
         customdata=conv_df["구매"].astype(int),
     ), secondary_y=False)
+
+    # ── 전환 발생일 소재 annotation ─────────────────────────────
+    _daily_cr = load_meta_daily_creative("last_30d")
+    if not _daily_cr.empty and not conv_df.empty:
+        # 날짜별 top 소재 정리
+        _cr_by_date = (
+            _daily_cr.sort_values("전환수", ascending=False)
+            .groupby("날짜").first().reset_index()
+        )
+        _cr_map = dict(zip(_cr_by_date["날짜"], zip(_cr_by_date["소재명"], _cr_by_date["전환수"])))
+        # 날짜별 총 소재 수
+        _cr_cnt = _daily_cr.groupby("날짜")["소재명"].count().to_dict()
+
+        for _, _row in conv_df.iterrows():
+            _date_key = str(_row["날짜"])
+            _vis = _row["방문자"]
+            if _date_key in _cr_map:
+                _top_name, _top_conv = _cr_map[_date_key]
+                _n_others = _cr_cnt.get(_date_key, 1) - 1
+                _label = f"Meta · {_top_name[:18]}{'…' if len(_top_name)>18 else ''}"
+                if _n_others > 0:
+                    _label += f" 외 {_n_others}개"
+                _label += f" ({int(_top_conv)}건)"
+            else:
+                # Meta 외 경로 (자연유입 등)
+                _label = f"전환 {int(_row['구매'])}건"
+            fig1.add_annotation(
+                x=_date_key, y=_vis,
+                text=_label,
+                showarrow=True,
+                arrowhead=0, arrowwidth=1, arrowcolor="#27AE60",
+                ax=0, ay=-36,
+                font=dict(size=10, color="#1A6B35"),
+                bgcolor="rgba(39,174,96,0.08)",
+                bordercolor="#27AE60",
+                borderwidth=1,
+                borderpad=3,
+                align="center",
+            )
+
     fig1.update_layout(
-        height=320, margin=dict(l=0, r=0, t=10, b=0),
+        height=360, margin=dict(l=0, r=0, t=10, b=0),
         plot_bgcolor="white", paper_bgcolor="white",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         xaxis=dict(showgrid=False, tickfont=dict(size=11)),
