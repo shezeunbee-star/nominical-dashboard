@@ -435,6 +435,85 @@ def load_meta_daily_creative(date_preset="last_30d"):
         return pd.DataFrame()
 
 
+# ── Instagram 계정 설정 ───────────────────────────────────────────────
+IG_ACCOUNTS = {
+    "beeunkim (개인)": {
+        "token": "IGAAfKtJZBiU09BZAFkyY3V3TUxXMFY1V1A1cHdiRXljMjV0LTQ5TmZA4RnUtODhSaVhIT0pPQXY1a3pNNk9NVWRoR3BUUnJITG1OTUUySjVicHZAMUDZAVN18wQ1hRQTJSMVpPdmJVRUdHelpMRkpqQkpJRHlFN2ZAzdDZA1ckRCaGlGcwZDZD",
+        "ig_id": "17841401409070018",
+        "color": "#C13584",
+    },
+    "nominical_official (공식)": {
+        "token": "",   # 토큰 추가 예정
+        "ig_id": "17841465777820020",
+        "color": "#1A1A2E",
+    },
+}
+
+@st.cache_data(ttl=3600)
+def load_ig_profile(account_name: str):
+    """Instagram 프로필 + 최근 미디어 + 인사이트 로드. TTL=1시간."""
+    cfg = IG_ACCOUNTS.get(account_name, {})
+    token = cfg.get("token", "")
+    ig_id = cfg.get("ig_id", "")
+    if not token or not ig_id:
+        return {}, []
+    try:
+        base = "https://graph.instagram.com/v25.0"
+
+        # 프로필
+        prof = _requests.get(f"{base}/me", params={
+            "fields": "id,username,followers_count,media_count,profile_picture_url,biography,website",
+            "access_token": token,
+        }, timeout=10).json()
+        if "error" in prof:
+            return prof, []
+
+        # 미디어 (최근 20개)
+        med = _requests.get(f"{base}/{ig_id}/media", params={
+            "fields": "id,caption,media_type,timestamp,like_count,comments_count,permalink,thumbnail_url,media_url",
+            "limit": 20,
+            "access_token": token,
+        }, timeout=10).json()
+
+        rows = []
+        for item in med.get("data", []):
+            mid   = item["id"]
+            mtype = item.get("media_type", "")
+
+            # 미디어 타입별 인사이트 지표
+            if mtype in ("VIDEO", "REEL"):
+                metrics = "reach,saved,total_interactions,views,ig_reels_avg_watch_time"
+            else:
+                metrics = "reach,saved,total_interactions"
+
+            ins_r = _requests.get(f"{base}/{mid}/insights", params={
+                "metric": metrics, "access_token": token,
+            }, timeout=8).json()
+
+            ins = {d["name"]: d["values"][0]["value"] for d in ins_r.get("data", [])}
+
+            rows.append({
+                "id":          mid,
+                "타입":        mtype,
+                "날짜":        item.get("timestamp", "")[:10],
+                "캡션":        (item.get("caption") or "")[:80],
+                "좋아요":      item.get("like_count", 0),
+                "댓글":        item.get("comments_count", 0),
+                "도달":        ins.get("reach", 0),
+                "저장":        ins.get("saved", 0),
+                "반응":        ins.get("total_interactions", 0),
+                "조회수":      ins.get("views", 0),
+                "평균시청(s)": round(ins.get("ig_reels_avg_watch_time", 0) / 1000, 1) if ins.get("ig_reels_avg_watch_time") else 0,
+                "썸네일":      item.get("thumbnail_url") or item.get("media_url", ""),
+                "링크":        item.get("permalink", ""),
+                "ER":          round((item.get("like_count", 0) + item.get("comments_count", 0)) / max(ins.get("reach", 1), 1) * 100, 2),
+            })
+
+        return prof, rows
+    except Exception as e:
+        return {"error": str(e)}, []
+
+
 # ── 데이터 로드: 플랫폼 매출 ────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_platform_data():
@@ -850,7 +929,7 @@ with col_refresh:
 st.markdown("---")
 
 # ── 탭 분기 ──────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["📊 방문자 · 광고 성과", "🏬 플랫폼별 매출", "📅 기간별 매출 조회"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 방문자 · 광고 성과", "🏬 플랫폼별 매출", "📅 기간별 매출 조회", "📱 인스타그램 콘텐츠"])
 
 
 # ════════════════════════════════════════════════════════════════
@@ -2128,6 +2207,163 @@ with tab3:
                     t3_display.sort_values("주문일", ascending=False),
                     use_container_width=True, hide_index=True
                 )
+
+
+# ════════════════════════════════════════════════════════════════
+# TAB 4: 인스타그램 콘텐츠 분석
+# ════════════════════════════════════════════════════════════════
+with tab4:
+    st.markdown("---")
+
+    _ig_account_list = list(IG_ACCOUNTS.keys())
+    _ig_sel = st.radio("계정 선택", _ig_account_list, horizontal=True, key="ig_account_sel")
+    _ig_cfg = IG_ACCOUNTS[_ig_sel]
+
+    if not _ig_cfg["token"]:
+        st.warning(f"⚠️ {_ig_sel} 토큰이 아직 설정되지 않았습니다.")
+        st.stop()
+
+    with st.spinner("인스타그램 데이터 불러오는 중..."):
+        _prof, _media_rows = load_ig_profile(_ig_sel)
+
+    if "error" in _prof:
+        st.error(f"API 오류: {_prof}")
+        st.stop()
+
+    _df_ig = pd.DataFrame(_media_rows) if _media_rows else pd.DataFrame()
+
+    # ── 프로필 헤더 ─────────────────────────────────────────────
+    _col_pic, _col_info = st.columns([1, 6])
+    with _col_pic:
+        if _prof.get("profile_picture_url"):
+            st.markdown(
+                f'<img src="{_prof["profile_picture_url"]}" style="width:80px;height:80px;border-radius:50%;border:2px solid {_ig_cfg["color"]};">',
+                unsafe_allow_html=True
+            )
+    with _col_info:
+        st.markdown(f"### @{_prof.get('username', '')}")
+        _bio = _prof.get("biography", "")
+        if _bio:
+            st.caption(_bio.replace("\n", " "))
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── KPI 카드 ────────────────────────────────────────────────
+    _k1, _k2, _k3, _k4, _k5 = st.columns(5)
+    with _k1: kpi_card("팔로워", fmt_num(_prof.get("followers_count", 0), "명"))
+    with _k2: kpi_card("게시물", f"{_prof.get('media_count', 0)}개")
+    if not _df_ig.empty:
+        _avg_reach = int(_df_ig["도달"].mean())
+        _avg_er    = round(_df_ig["ER"].mean(), 2)
+        _avg_save  = int(_df_ig["저장"].mean())
+        _total_int = int(_df_ig["반응"].sum())
+        with _k3: kpi_card("평균 도달", fmt_num(_avg_reach, "명"))
+        with _k4: kpi_card("평균 ER", f"{_avg_er}%", "좋아요+댓글/도달")
+        with _k5: kpi_card("평균 저장", fmt_num(_avg_save, "회"))
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("---")
+
+    if _df_ig.empty:
+        st.info("콘텐츠 데이터가 없어요.")
+    else:
+        # ── 차트: 콘텐츠별 도달 TOP ─────────────────────────────
+        _col_ca, _col_cb = st.columns([3, 2])
+
+        with _col_ca:
+            chart_container("콘텐츠별 도달 TOP 10", "최근 게시물 도달 기준 순위")
+            _top_reach = _df_ig.nlargest(10, "도달").copy()
+            _top_reach["캡션_short"] = _top_reach["날짜"] + " · " + _top_reach["캡션"].apply(lambda x: x[:20] + "…" if len(x) > 20 else x)
+            _top_sorted = _top_reach.sort_values("도달")
+            _fig_ig = go.Figure(go.Bar(
+                x=_top_sorted["도달"], y=_top_sorted["캡션_short"],
+                orientation="h",
+                marker_color=_ig_cfg["color"],
+                text=_top_sorted["도달"].apply(lambda x: f"{x:,}"),
+                textposition="outside",
+                hovertemplate="<b>%{y}</b><br>도달: %{x:,}명<extra></extra>",
+            ))
+            _fig_ig.update_layout(
+                height=max(280, len(_top_reach) * 34),
+                margin=dict(l=0, r=60, t=10, b=0),
+                plot_bgcolor="white", paper_bgcolor="white",
+                xaxis=dict(showgrid=True, gridcolor="#F0F0F0"),
+                yaxis=dict(showgrid=False, tickfont=dict(size=10)),
+            )
+            st.plotly_chart(_fig_ig, use_container_width=True)
+
+        with _col_cb:
+            chart_container("타입별 평균 성과", "게시물 유형별 비교")
+            _type_stats = _df_ig.groupby("타입").agg(
+                도달=("도달", "mean"), 저장=("저장", "mean"),
+                ER=("ER", "mean"), 건수=("id", "count")
+            ).reset_index()
+            _type_stats["타입"] = _type_stats["타입"].map(
+                {"IMAGE": "📷 이미지", "VIDEO": "🎬 릴스", "CAROUSEL_ALBUM": "🖼 캐러셀"}
+            ).fillna(_type_stats["타입"])
+            st.dataframe(
+                _type_stats.rename(columns={"건수": "게시물수", "도달": "평균도달", "저장": "평균저장"}),
+                use_container_width=True, hide_index=True
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── 일별 도달 트렌드 ─────────────────────────────────────
+        chart_container("일별 도달 트렌드", "게시 날짜 기준 도달 추이")
+        _df_trend = _df_ig.groupby("날짜").agg(도달=("도달", "sum"), 반응=("반응", "sum")).reset_index().sort_values("날짜")
+        _fig_tr = go.Figure()
+        _fig_tr.add_trace(go.Bar(x=_df_trend["날짜"], y=_df_trend["도달"], name="도달",
+            marker_color=f"rgba({int(_ig_cfg['color'][1:3],16)},{int(_ig_cfg['color'][3:5],16)},{int(_ig_cfg['color'][5:7],16)},0.7)"))
+        _fig_tr.add_trace(go.Scatter(x=_df_trend["날짜"], y=_df_trend["반응"], name="반응(우)",
+            mode="lines+markers", line=dict(color=COLOR["green"], width=2),
+            yaxis="y2"))
+        _fig_tr.update_layout(
+            height=260, margin=dict(l=0, r=0, t=10, b=0),
+            plot_bgcolor="white", paper_bgcolor="white",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+            yaxis=dict(showgrid=True, gridcolor="#F0F0F0", title="도달"),
+            yaxis2=dict(overlaying="y", side="right", showgrid=False, title="반응"),
+            hovermode="x unified",
+        )
+        st.plotly_chart(_fig_tr, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── 콘텐츠 상세 테이블 (썸네일 포함) ────────────────────
+        chart_container("콘텐츠 상세", "최근 20개 게시물 · 썸네일 · 전체 지표")
+
+        _th2 = lambda t: f"<th style='padding:8px 10px;background:#F7F7F7;font-size:12px;font-weight:600;color:#555;border-bottom:2px solid #E8E8E8;white-space:nowrap;'>{t}</th>"
+        _td2 = lambda v, c="#1A1A1A": f"<td style='padding:7px 10px;font-size:12px;color:{c};border-bottom:1px solid #F0F0F0;text-align:right;white-space:nowrap;'>{v}</td>"
+
+        _rows_html2 = ""
+        for _, _r in _df_ig.iterrows():
+            _thumb = _r["썸네일"]
+            _img_html = f"<a href='{_r['링크']}' target='_blank'><img src='{_thumb}' style='width:48px;height:48px;object-fit:cover;border-radius:5px;display:block;' onerror=\"this.style.display='none'\"></a>" if _thumb else "—"
+            _cap = str(_r["캡션"])[:30] + ("…" if len(str(_r["캡션"])) > 30 else "")
+            _type_icon = {"IMAGE": "📷", "VIDEO": "🎬", "CAROUSEL_ALBUM": "🖼"}.get(_r["타입"], "📄")
+            _er_color = "#27AE60" if _r["ER"] >= 5 else "#E67E22" if _r["ER"] >= 2 else "#E74C3C"
+            _rows_html2 += f"""<tr>
+                <td style='padding:6px 10px;border-bottom:1px solid #F0F0F0;'>{_img_html}</td>
+                <td style='padding:7px 10px;font-size:11px;color:#555;border-bottom:1px solid #F0F0F0;'>{_r['날짜']}</td>
+                <td style='padding:7px 10px;font-size:11px;border-bottom:1px solid #F0F0F0;'>{_type_icon} {_cap}</td>
+                {_td2(f"{_r['좋아요']:,}")}
+                {_td2(f"{_r['댓글']:,}")}
+                {_td2(f"{int(_r['도달']):,}")}
+                {_td2(f"{int(_r['저장']):,}")}
+                {_td2(f"{_r['ER']:.2f}%", _er_color)}
+                {_td2(f"{int(_r['조회수']):,}" if _r['조회수'] > 0 else "—")}
+            </tr>"""
+
+        st.markdown(f"""
+        <div style='overflow-x:auto;'>
+        <table style='width:100%;border-collapse:collapse;'>
+            <thead><tr>
+                {_th2('썸네일')}{_th2('날짜')}{_th2('내용')}
+                {_th2('좋아요')}{_th2('댓글')}{_th2('도달')}{_th2('저장')}{_th2('ER(%)')}{_th2('조회수')}
+            </tr></thead>
+            <tbody>{_rows_html2}</tbody>
+        </table></div>""", unsafe_allow_html=True)
 
 
 # ── 푸터 ───────────────────────────────────────────────────────────
