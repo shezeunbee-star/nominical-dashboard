@@ -1033,7 +1033,8 @@ with tab1:
     # annotation 라벨 (점 위 텍스트)
     if not conv_df.empty:
         for _, _row in conv_df.iterrows():
-            _date_key = str(_row["날짜_key"])  # YYYY-MM-DD
+            _date_key  = str(_row["날짜_key"])  # YYYY-MM-DD — Meta 조회용
+            _date_label = str(_row["날짜"])      # M/D — 차트 x축 좌표용
             _vis = _row["방문자"]
             if _date_key in _cr_by_date:
                 _top = _cr_by_date[_date_key].iloc[0]
@@ -1045,7 +1046,7 @@ with tab1:
             else:
                 _label = f"전환 {int(_row['구매'])}건"
             fig1.add_annotation(
-                x=_date_key, y=_vis,
+                x=_date_label, y=_vis,  # 차트 x축과 동일한 M/D 형식
                 text=_label,
                 showarrow=True,
                 arrowhead=0, arrowwidth=1, arrowcolor="#27AE60",
