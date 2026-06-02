@@ -320,9 +320,15 @@ def load_meta_ad_insights(date_preset="last_30d"):
         ad_ids = []
         for d in resp["data"]:
             purchases = revenue = 0
-            for a in d.get("actions", []):
-                if a["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
-                    purchases = int(float(a["value"]))
+            # omni_purchase = Meta 권장 통합 구매 지표 (중복 없음)
+            # 없으면 offsite_conversion.fb_pixel_purchase 로 폴백
+            _actions = {a["action_type"]: int(float(a["value"])) for a in d.get("actions", [])}
+            purchases = (
+                _actions.get("omni_purchase")
+                or _actions.get("offsite_conversion.fb_pixel_purchase")
+                or _actions.get("purchase")
+                or 0
+            )
             for r in d.get("purchase_roas", []):
                 spend_val = float(d.get("spend", 0))
                 revenue = round(spend_val * float(r.get("value", 0)))
