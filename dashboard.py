@@ -459,7 +459,12 @@ def update_ga4_yesterday():
         all_dates = ws.col_values(1)
         row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
         if not row_idx:
-            return False, f"'{day_label}' 날짜를 시트에서 찾을 수 없어요. 시트에 해당 날짜 행을 추가해 주세요."
+            # 날짜 행이 없으면 새 행 추가
+            ws.append_row([day_label], value_input_option="USER_ENTERED")
+            all_dates = ws.col_values(1)
+            row_idx = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
+        if not row_idx:
+            return False, f"'{day_label}' 행 생성 실패"
 
         ws.update(values=[[sessions, transactions]], range_name=f"K{row_idx}:L{row_idx}")
         time.sleep(0.2)
@@ -530,7 +535,12 @@ def update_meta_yesterday():
         all_dates = ws.col_values(1)
         row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
         if not row_idx:
-            return False, f"'{day_label}' 날짜를 시트에서 찾을 수 없어요."
+            # 날짜 행이 없으면 새 행 추가
+            ws.append_row([day_label], value_input_option="USER_ENTERED")
+            all_dates = ws.col_values(1)
+            row_idx = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
+        if not row_idx:
+            return False, f"'{day_label}' 행 생성 실패"
 
         ws.update(values=[[spend, impressions, clicks]], range_name=f"C{row_idx}:E{row_idx}")
         time.sleep(0.2)
