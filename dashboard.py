@@ -542,6 +542,121 @@ def update_meta_yesterday():
         return False, f"❌ Meta 업데이트 실패: {e}"
 
 
+def update_cafe24_yesterday():
+    """어제 Cafe24(자사몰+무신사+지그재그) 주문을 플랫폼 매출 시트에 추가. (bool, str) 반환."""
+    try:
+        import base64, json as _json
+        from datetime import date, timedelta
+
+        yesterday = date.today() - timedelta(days=1)
+        date_str  = yesterday.strftime("%Y-%m-%d")
+
+        # ── Cafe24 토큰 로드 & 갱신 ──────────────────────────────
+        BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+        TOKEN_FILE = os.path.join(BASE_DIR, "cafe24_token.json")
+        if not os.path.exists(TOKEN_FILE):
+            return False, "❌ cafe24_token.json 없음"
+
+        with open(TOKEN_FILE) as f:
+            t = _json.load(f)
+
+        # 토큰 만료 확인 및 갱신
+        from datetime import datetime as _dt
+        if t.get("expires_at"):
+            try:
+                exp = _dt.fromisoformat(t["expires_at"].replace(".000", ""))
+                if _dt.now() >= exp - timedelta(minutes=10):
+                    cred = base64.b64encode(f"{t['client_id']}:{t['client_secret']}".encode()).decode()
+                    resp = _requests.post(
+                        f"https://{t['shop_id']}.cafe24api.com/api/v2/oauth/token",
+                        headers={"Authorization": f"Basic {cred}",
+                                 "Content-Type": "application/x-www-form-urlencoded"},
+                        data={"grant_type": "refresh_token", "refresh_token": t["refresh_token"]},
+                        timeout=10,
+                    )
+                    if resp.status_code == 200:
+                        new = resp.json()
+                        t["access_token"] = new["access_token"]
+                        t["expires_at"]   = new.get("expires_at", "")
+                        if new.get("refresh_token"):
+                            t["refresh_token"] = new["refresh_token"]
+                        with open(TOKEN_FILE, "w") as f2:
+                            _json.dump(t, f2, indent=2)
+            except Exception:
+                pass
+
+        # ── 주문 조회 ────────────────────────────────────────────
+        MARKET_MAP = {"musinsa": "무신사", "zigzag": "지그재그"}
+        COMM_CAFE24 = 3
+        COMM_DEFAULT = 30
+
+        headers = {
+            "Authorization": f"Bearer {t['access_token']}",
+            "X-Cafe24-Api-Version": "2026-03-01",
+        }
+        resp = _requests.get(
+            f"https://{t['shop_id']}.cafe24api.com/api/v2/orders",
+            headers=headers,
+            params={"start_date": date_str, "end_date": date_str,
+                    "limit": 100, "embed": "items"},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return False, f"❌ Cafe24 API 오류: {resp.status_code}"
+
+        orders = resp.json().get("orders", [])
+
+        # ── 시트에 추가 ──────────────────────────────────────────
+        creds = _get_sheet_creds()
+        gc    = gspread.authorize(creds)
+        ws    = gc.open_by_key(SPREADSHEET_ID).worksheet(PLATFORM_SHEET_NAME)
+
+        existing_raw = ws.get_all_values()
+        existing_keys = set()
+        for row in existing_raw[1:]:
+            if len(row) >= 6:
+                existing_keys.add(f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}")
+
+        new_rows = []
+        for order in orders:
+            mid      = (order.get("market_id") or "").lower().strip()
+            platform = MARKET_MAP.get(mid, "Cafe24")
+            order_date = (order.get("order_date") or "")[:10]
+            items = order.get("items", [])
+            for item in items:
+                name    = str(item.get("product_name", "-"))
+                code    = str(item.get("product_code", "-"))
+                opt     = str(item.get("option_value", "") or "")
+                import re as _re
+                color = _re.search(r'색상=([^,)]+)', opt)
+                size  = _re.search(r'사이즈=([^,)]+)', opt)
+                color = color.group(1).strip() if color else "-"
+                size  = size.group(1).strip()  if size  else "-"
+                qty   = int(float(item.get("quantity", 1) or 1))
+                price = int(float(item.get("product_price", 0) or 0))
+                total = price * qty
+                comm  = COMM_CAFE24 if platform == "Cafe24" else COMM_DEFAULT
+                profit = round(total * (1 - comm / 100))
+                status = "정상"
+                key = f"{platform}|{order_date}|{code}|{color}|{size}"
+                if key not in existing_keys:
+                    new_rows.append([platform, order_date, name, code,
+                                     color, size, qty, total, comm, profit, status])
+                    existing_keys.add(key)
+
+        if new_rows:
+            # 날짜순 정렬 후 append
+            all_data = [r for r in existing_raw[1:] if r] + new_rows
+            all_data.sort(key=lambda r: r[1] if len(r) > 1 else "")
+            ws.resize(rows=1)
+            ws.append_rows([existing_raw[0]] + all_data, value_input_option="USER_ENTERED")
+
+        return True, f"✅ Cafe24 {date_str} 완료 — {len(new_rows)}건 추가"
+
+    except Exception as e:
+        return False, f"❌ Cafe24 업데이트 실패: {e}"
+
+
 # ══════════════════════════════════════════════════════════════════
 # 메인
 # ══════════════════════════════════════════════════════════════════
