@@ -281,6 +281,96 @@ def load_data():
     return result
 
 
+@st.cache_data(ttl=3600)
+def load_meta_ad_insights(date_preset="last_30d"):
+    """Meta 광고 소재(Ad)별 성과 데이터 로드. TTL=1시간."""
+    try:
+        meta_token = None
+        for key in ("meta_access_token", "META_ACCESS_TOKEN", "meta_token"):
+            try:
+                meta_token = st.secrets[key]
+                if meta_token: break
+            except Exception: pass
+        if not meta_token:
+            _tf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta_token.txt")
+            if os.path.exists(_tf):
+                meta_token = open(_tf).read().strip()
+        if not meta_token:
+            return pd.DataFrame()
+
+        AD_ACCOUNT = "act_1599099620677018"
+
+        # ① Ad 레벨 인사이트
+        resp = _requests.get(
+            f"https://graph.facebook.com/v25.0/{AD_ACCOUNT}/insights",
+            params={
+                "level": "ad",
+                "fields": "ad_id,ad_name,spend,impressions,clicks,ctr,actions,purchase_roas",
+                "date_preset": date_preset,
+                "limit": 100,
+                "access_token": meta_token,
+            },
+            timeout=20,
+        ).json()
+
+        if not resp.get("data"):
+            return pd.DataFrame()
+
+        rows = []
+        ad_ids = []
+        for d in resp["data"]:
+            purchases = revenue = 0
+            for a in d.get("actions", []):
+                if a["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
+                    purchases = int(float(a["value"]))
+            for r in d.get("purchase_roas", []):
+                spend_val = float(d.get("spend", 0))
+                revenue = round(spend_val * float(r.get("value", 0)))
+
+            spend  = round(float(d.get("spend", 0)))
+            clicks = int(d.get("clicks", 0))
+            imps   = int(d.get("impressions", 0))
+            ctr    = round(float(d.get("ctr", 0)), 2)   # Meta API: 이미 % 값
+            cpo    = round(spend / purchases) if purchases > 0 else 0
+            roas   = round(revenue / spend, 1) if spend > 0 else 0
+
+            rows.append({
+                "ad_id": d.get("ad_id", ""),
+                "광고명":  d.get("ad_name", "-"),
+                "광고비":  spend,
+                "노출수":  imps,
+                "클릭수":  clicks,
+                "CTR":    ctr,
+                "전환수":  purchases,
+                "CPO":    cpo,
+                "ROAS":   roas,
+                "매출":    revenue,
+            })
+            ad_ids.append(d.get("ad_id", ""))
+
+        df_ads = pd.DataFrame(rows)
+
+        # ② 썸네일 가져오기 (상위 20개 광고)
+        thumbnails = {}
+        for ad_id in ad_ids[:20]:
+            try:
+                cr = _requests.get(
+                    f"https://graph.facebook.com/v25.0/{ad_id}/adcreatives",
+                    params={"fields": "thumbnail_url", "access_token": meta_token},
+                    timeout=8,
+                ).json()
+                if cr.get("data"):
+                    thumbnails[ad_id] = cr["data"][0].get("thumbnail_url", "")
+            except Exception:
+                pass
+
+        df_ads["thumbnail"] = df_ads["ad_id"].map(thumbnails).fillna("")
+        return df_ads.sort_values("전환수", ascending=False).reset_index(drop=True)
+
+    except Exception:
+        return pd.DataFrame()
+
+
 # ── 데이터 로드: 플랫폼 매출 ────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_platform_data():
@@ -1151,6 +1241,141 @@ with tab1:
         return insights
 
     # (기간 종합 인사이트는 각 차트 아래로 이동됨)
+
+    # ════════════════════════════════════════════════════════════
+    # 광고 소재별 성과 섹션
+    # ════════════════════════════════════════════════════════════
+    st.markdown("---")
+    chart_container("📱 광고 소재별 성과", "Meta 광고 소재(Ad) 단위 전환·CPO·ROAS·CTR")
+
+    _col_pr, _ = st.columns([2, 5])
+    with _col_pr:
+        _creative_preset = st.selectbox(
+            "기간", ["최근 7일", "최근 14일", "최근 30일"],
+            key="creative_preset", label_visibility="collapsed"
+        )
+    _preset_map = {"최근 7일": "last_7d", "최근 14일": "last_14d", "최근 30일": "last_30d"}
+
+    with st.spinner("소재 데이터 불러오는 중..."):
+        df_ads = load_meta_ad_insights(_preset_map[_creative_preset])
+
+    if df_ads.empty:
+        st.info("Meta 광고 소재 데이터를 불러올 수 없어요. Meta 토큰을 확인해 주세요.")
+    else:
+        # ── 요약 KPI ────────────────────────────────────────────
+        _total_spend = int(df_ads["광고비"].sum())
+        _total_conv  = int(df_ads["전환수"].sum())
+        _total_rev   = int(df_ads["매출"].sum())
+        _avg_cpo     = round(_total_spend / _total_conv) if _total_conv > 0 else 0
+        _avg_roas    = round(_total_rev / _total_spend, 1) if _total_spend > 0 else 0
+        _active_ads  = len(df_ads[df_ads["광고비"] > 0])
+
+        _kc1, _kc2, _kc3, _kc4, _kc5 = st.columns(5)
+        with _kc1: kpi_card("집행 소재 수", f"{_active_ads}개")
+        with _kc2: kpi_card("총 광고비", fmt_num(_total_spend, "원"))
+        with _kc3: kpi_card("총 전환수", f"{_total_conv}건")
+        with _kc4: kpi_card("평균 CPO", f"{_avg_cpo:,}원" if _avg_cpo else "—")
+        with _kc5: kpi_card("전체 ROAS", f"{_avg_roas}배", "목표 3배 이상", _avg_roas >= 3)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── 전환수 TOP 차트 ──────────────────────────────────────
+        _top = df_ads[df_ads["전환수"] > 0].head(10).copy()
+        _top["광고명_short"] = _top["광고명"].apply(lambda x: x[:30] + "…" if len(str(x)) > 30 else str(x))
+
+        if not _top.empty:
+            _col_ch, _col_tb = st.columns([2, 3])
+            with _col_ch:
+                chart_container("전환 발생 소재 TOP 10", "전환수 기준 상위 소재")
+                _top_sorted = _top.sort_values("전환수")
+                _fig_cr = go.Figure(go.Bar(
+                    x=_top_sorted["전환수"],
+                    y=_top_sorted["광고명_short"],
+                    orientation="h",
+                    marker_color=COLOR["green"],
+                    text=_top_sorted["전환수"].astype(str) + "건",
+                    textposition="outside",
+                    hovertemplate="<b>%{y}</b><br>전환: %{x}건<extra></extra>",
+                ))
+                _fig_cr.update_layout(
+                    height=max(250, len(_top) * 36),
+                    margin=dict(l=0, r=60, t=10, b=0),
+                    plot_bgcolor="white", paper_bgcolor="white",
+                    xaxis=dict(showgrid=True, gridcolor="#F0F0F0"),
+                    yaxis=dict(showgrid=False, tickfont=dict(size=11)),
+                )
+                st.plotly_chart(_fig_cr, use_container_width=True)
+
+            with _col_tb:
+                chart_container("소재별 상세 지표", "CPO·ROAS·CTR 비교")
+                _disp = _top[["광고명_short", "광고비", "클릭수", "CTR", "전환수", "CPO", "ROAS", "매출"]].copy()
+                _disp.columns = ["소재명", "광고비", "클릭", "CTR(%)", "전환", "CPO", "ROAS", "매출"]
+                _disp["광고비"] = _disp["광고비"].apply(lambda x: f"{x:,}원")
+                _disp["CPO"]   = _disp["CPO"].apply(lambda x: f"{x:,}원" if x > 0 else "—")
+                _disp["매출"]  = _disp["매출"].apply(lambda x: f"{x:,}원")
+                _disp["ROAS"]  = _disp["ROAS"].apply(lambda x: f"{x}배")
+                _disp["CTR(%)"] = _disp["CTR(%)"].apply(lambda x: f"{x:.2f}%")
+                st.dataframe(_disp, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"{_creative_preset} 기간에 전환이 발생한 소재가 없어요.")
+
+        # ── 소재 카드 그리드 (썸네일 + 핵심 지표) ────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        chart_container("소재 카드", "썸네일 · 전환 · CPO · ROAS")
+
+        _card_ads = df_ads[df_ads["thumbnail"] != ""].head(12)
+        if _card_ads.empty:
+            st.caption("썸네일을 불러올 수 없어요. Meta 광고 계정의 크리에이티브 접근 권한을 확인해 주세요.")
+        else:
+            _cols_per_row = 4
+            for _row_start in range(0, len(_card_ads), _cols_per_row):
+                _row_ads = _card_ads.iloc[_row_start:_row_start + _cols_per_row]
+                _card_cols = st.columns(_cols_per_row)
+                for _ci, (_, _ad) in enumerate(zip(_card_cols, _row_ads.itertuples())):
+                    with _card_cols[_ci]:
+                        _conv_color = "#27AE60" if _ad.전환수 > 0 else "#BDC3C7"
+                        _name_short = str(_ad.광고명)[:28] + "…" if len(str(_ad.광고명)) > 28 else str(_ad.광고명)
+                        st.markdown(
+                            f"""<div style="border:1px solid #E8E8E8;border-radius:10px;padding:10px;margin-bottom:8px;background:#FAFAFA;">
+                            <img src="{_ad.thumbnail}" style="width:100%;border-radius:6px;margin-bottom:8px;" onerror="this.style.display='none'">
+                            <div style="font-size:11px;color:#555;margin-bottom:6px;line-height:1.3;">{_name_short}</div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;">
+                                <span style="color:{_conv_color};font-weight:700;">전환 {_ad.전환수}건</span>
+                                <span style="color:#888;">ROAS {_ad.ROAS}배</span>
+                            </div>
+                            <div style="display:flex;justify-content:space-between;font-size:11px;color:#999;margin-top:4px;">
+                                <span>CPO {f'{_ad.CPO:,}원' if _ad.CPO > 0 else '—'}</span>
+                                <span>CTR {_ad.CTR:.2f}%</span>
+                            </div>
+                            </div>""",
+                            unsafe_allow_html=True,
+                        )
+
+        # ── 소재 인사이트 ────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        if not df_ads.empty and _total_conv > 0:
+            _best = df_ads[df_ads["전환수"] == df_ads["전환수"].max()].iloc[0]
+            _best_name = str(_best["광고명"])[:35]
+            _worst_spend = df_ads[(df_ads["광고비"] > 0) & (df_ads["전환수"] == 0)]
+            _insight_lines = [
+                f"🏆 <b>전환 1위 소재</b>: {_best_name} — 전환 {int(_best['전환수'])}건 · CPO {int(_best['CPO']):,}원 · ROAS {_best['ROAS']}배. "
+                f"{'예산 증액 및 유사 타겟 확장(Lookalike) 적용 권장.' if _best['ROAS'] >= 3 else '전환은 발생하나 ROAS 3배 미달 — 랜딩 페이지 최적화 후 증액 검토.'}",
+            ]
+            if not _worst_spend.empty:
+                _waste = int(_worst_spend["광고비"].sum())
+                _insight_lines.append(
+                    f"⚠️ <b>전환 0건 소재 {len(_worst_spend)}개</b> — 합산 광고비 {_waste:,}원 소진 중. "
+                    f"소재 교체 또는 일시 중단 검토. 이 예산을 전환 1위 소재에 재배분하면 CPO 개선 가능."
+                )
+            _high_ctr_no_conv = df_ads[(df_ads["CTR"] >= 1.5) & (df_ads["전환수"] == 0)]
+            if not _high_ctr_no_conv.empty:
+                _insight_lines.append(
+                    f"💡 <b>CTR 높으나 전환 0건 소재 {len(_high_ctr_no_conv)}개</b> — 클릭 유입은 있으나 랜딩 후 이탈. "
+                    f"소재·랜딩 메시지 불일치 가능성. 랜딩 URL 및 상품 페이지 구성 점검 필요."
+                )
+            for line in _insight_lines:
+                st.markdown(f"<div style='font-size:13px;line-height:1.8;padding:4px 0'>{line}</div>",
+                            unsafe_allow_html=True)
 
 
 # ════════════════════════════════════════════════════════════════
