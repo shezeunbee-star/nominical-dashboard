@@ -214,7 +214,26 @@ def load_data():
     def safe_num(col, default=0):
         return pd.to_numeric(df[col], errors="coerce").fillna(default)
 
-    date_col    = df.iloc[:, 0].apply(lambda x: str(x).strip())
+    # 날짜 칼럼을 M/D 형식으로 통일 (datetime 객체도 처리)
+    def normalize_date(x):
+        s = str(x).strip()
+        try:
+            # datetime 객체인 경우
+            if hasattr(x, 'month'):
+                return f"{x.month}/{x.day}"
+            # "5/1" 같은 문자열이면 그대로 반환
+            elif "/" in s:
+                return s
+            # 다른 형식 시도
+            else:
+                import pandas as pd
+                dt = pd.to_datetime(s, errors='coerce')
+                if pd.notna(dt):
+                    return f"{dt.month}/{dt.day}"
+        except:
+            pass
+        return s
+    date_col    = df.iloc[:, 0].apply(normalize_date)
     spend       = safe_num(headers[2])
     impressions = safe_num(headers[3])
     clicks      = safe_num(headers[4])
