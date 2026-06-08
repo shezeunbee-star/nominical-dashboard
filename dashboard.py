@@ -863,6 +863,87 @@ def get_last_data_date():
         return None
 
 
+def add_empty_rows_for_gaps():
+    """6/1과 6/7 사이같이 갭이 있으면 빈 행들을 자동으로 추가."""
+    from datetime import date, timedelta
+
+    try:
+        gc = gspread.authorize(_get_oauth_creds())
+        ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        all_dates = ws.col_values(1)
+
+        print("\n🔍 갭이 있는지 확인 중...")
+
+        # 모든 날짜를 date 객체로 변환
+        date_objects = []
+        date_to_row = {}
+        for i, d in enumerate(all_dates[1:], start=2):  # 헤더 제외
+            d_str = str(d).strip()
+            if not d_str or "종합" in d_str or "날짜" in d_str:
+                continue
+            try:
+                parts = d_str.split("/")
+                if len(parts) == 2:
+                    month, day = int(parts[0]), int(parts[1])
+                    dt = date(2026, month, day)
+                    date_objects.append(dt)
+                    date_to_row[dt] = i
+            except:
+                continue
+
+        if not date_objects:
+            return False, "데이터가 없어요."
+
+        # 갭 찾기
+        dates_needed = set()
+        min_date = min(date_objects)
+        max_date = max(date_objects)
+
+        current = min_date
+        while current <= max_date:
+            if current not in date_to_row:
+                dates_needed.add(current)
+            current += timedelta(days=1)
+
+        if not dates_needed:
+            return True, "갭이 없어요 (이미 모든 날짜가 있음)."
+
+        print(f"   추가할 날짜: {sorted([f'{d.month}/{d.day}' for d in dates_needed])}")
+
+        # 날짜별로 정렬해서 올바른 위치에 행 삽입
+        sorted_dates = sorted(dates_needed)
+
+        for insert_date in sorted_dates:
+            # 이 날짜가 들어갈 위치 찾기
+            insert_row = None
+            for check_date in sorted(date_to_row.keys()):
+                if check_date > insert_date:
+                    insert_row = date_to_row[check_date]
+                    break
+
+            if insert_row is None:
+                # 맨 뒤에 추가
+                insert_row = len(all_dates) + 1
+
+            # 행 삽입 (날짜만 입력)
+            date_label = f"{insert_date.month}/{insert_date.day}"
+            ws.insert_row([date_label], index=insert_row)
+
+            # date_to_row 업데이트 (뒤의 행들 번호 변경)
+            for d in list(date_to_row.keys()):
+                if date_to_row[d] >= insert_row:
+                    date_to_row[d] += 1
+            date_to_row[insert_date] = insert_row
+
+            print(f"   ✅ {date_label} 행 추가 (row {insert_row})")
+            time.sleep(0.2)
+
+        return True, f"✅ {len(sorted_dates)}개 빈 행 추가 완료!"
+
+    except Exception as e:
+        return False, f"❌ 빈 행 추가 실패: {e}"
+
+
 def fill_missing_dates():
     """비어있는 날짜들을 자동 감지하고 GA4 데이터로 채우기."""
     from datetime import date, timedelta
