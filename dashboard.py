@@ -827,22 +827,20 @@ def update_ga4_for_date(target_date):
                     row_idx = i + 1
                     break
 
-        # 전환율 계산 (transactions / sessions × 100)
-        conv_rate = round(transactions / sessions * 100, 2) if sessions > 0 else 0
-
-        # 데이터 업데이트 (K~V열) — 헤더 기준 정확한 매핑
-        ws.update_cell(row_idx, 11, sessions)          # K: 방문자수
-        ws.update_cell(row_idx, 12, transactions)      # L: 구매자수
-        ws.update_cell(row_idx, 13, conv_rate)         # M: 전환율(%)
-        ws.update_cell(row_idx, 14, bounce)            # N: 이탈율
-        ws.update_cell(row_idx, 15, avg_price)         # O: 객단가(원)
-        ws.update_cell(row_idx, 16, revenue)           # P: 자사몰매출(원)
-        ws.update_cell(row_idx, 17, ch_meta)           # Q: 유입_메타광고
-        ws.update_cell(row_idx, 18, ch_official)       # R: 유입_공식인스타
-        ws.update_cell(row_idx, 19, ch_personal)       # S: 유입_개인인스타
-        ws.update_cell(row_idx, 20, ch_direct)         # T: 유입_직접
-        ws.update_cell(row_idx, 21, new_users)         # U: 신규방문자
-        ws.update_cell(row_idx, 22, returning_users)   # V: 재방문자
+        # 대시보드 읽기 코드 기준 정확한 인덱스 매핑
+        # (load_data에서 headers[10]=방문자, [11]=구매, [13]=이탈율, [14]=객단가, [15]=매출...)
+        ws.update_cell(row_idx, 11, sessions)          # K(idx10): 방문자수
+        ws.update_cell(row_idx, 12, transactions)      # L(idx11): 구매자수
+        # M(idx12): 전환율 — 대시보드가 읽지 않음 (skip)
+        ws.update_cell(row_idx, 14, bounce)            # N(idx13): 이탈율
+        ws.update_cell(row_idx, 15, avg_price)         # O(idx14): 객단가(원)
+        ws.update_cell(row_idx, 16, revenue)           # P(idx15): 자사몰매출(원)
+        ws.update_cell(row_idx, 17, ch_meta)           # Q(idx16): 유입_메타광고
+        ws.update_cell(row_idx, 18, ch_official)       # R(idx17): 유입_공식인스타
+        ws.update_cell(row_idx, 19, ch_personal)       # S(idx18): 유입_개인인스타
+        ws.update_cell(row_idx, 20, ch_direct)         # T(idx19): 유입_직접
+        ws.update_cell(row_idx, 21, new_users)         # U(idx20): 신규방문자
+        ws.update_cell(row_idx, 22, returning_users)   # V(idx21): 재방문자
 
         return True, f"✅ GA4 {day_label} 완료 — 방문자 {sessions:,}명 · 구매 {transactions}건"
 
