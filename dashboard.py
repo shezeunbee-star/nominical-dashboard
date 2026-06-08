@@ -1012,22 +1012,20 @@ def update_meta_for_date(target_date):
             timeout=15,
         ).json()
 
-        # 디버그: API 응답 확인
-        import sys
-        print(f"[Meta API {day_label}] 응답: {res}", file=sys.stderr)
-
-        spend = impressions = clicks = purchases = 0
+        spend = impressions = clicks = purchases = ctr = cpc = roas = cpa = 0
         if res.get("data"):
             d           = res["data"][0]
             spend       = round(float(d.get("spend", 0)))
             impressions = int(d.get("impressions", 0))
             clicks      = int(d.get("clicks", 0))
+            ctr         = round(float(d.get("ctr", 0)), 2)
+            cpc         = round(float(d.get("cpc", 0)))
             for action in d.get("actions", []):
                 if action["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
                     purchases = int(float(action["value"]))
-            print(f"[Meta {day_label}] 추출: spend={spend}, imp={impressions}, clicks={clicks}, purchases={purchases}", file=sys.stderr)
-        else:
-            print(f"[Meta {day_label}] 'data' 없음. keys: {res.keys() if isinstance(res, dict) else 'not dict'}", file=sys.stderr)
+            for roas_data in d.get("purchase_roas", []):
+                roas = round(float(roas_data.get("value", 0)), 2)
+            cpa = round(spend / purchases) if purchases > 0 else 0
 
         # Google Sheets에서 행 찾기
         all_dates = ws.col_values(1)
@@ -1040,10 +1038,11 @@ def update_meta_for_date(target_date):
         if not row_idx:
             return False, f"'{day_label}' 행을 찾을 수 없음"
 
-        # C~E, H 칼럼에 데이터 쓰기
-        ws.update(values=[[spend, impressions, clicks]], range_name=f"C{row_idx}:E{row_idx}")
-        time.sleep(0.2)
-        ws.update(values=[[purchases]], range_name=f"H{row_idx}")
+        # C~J 칼럼 한 번에 쓰기 (광고비, 노출, 클릭, CTR, CPC, 전환, ROAS, CPA)
+        ws.update(
+            values=[[spend, impressions, clicks, ctr, cpc, purchases, roas, cpa]],
+            range_name=f"C{row_idx}:J{row_idx}"
+        )
 
         return True, f"✅ Meta {day_label} 완료 — 광고비 {spend:,}원 · 전환 {purchases}건"
 
@@ -1122,16 +1121,11 @@ def fill_missing_dates():
             ok_ga4, msg_ga4 = update_ga4_for_date(d)
             if not ok_ga4:
                 errors.append(f"GA4 {d.month}/{d.day}: {msg_ga4}")
-            else:
-                st.toast(msg_ga4, icon="✅")
 
             # Meta 데이터
             ok_meta, msg_meta = update_meta_for_date(d)
             if not ok_meta:
                 errors.append(f"Meta {d.month}/{d.day}: {msg_meta}")
-                st.toast(msg_meta, icon="⚠️")
-            else:
-                st.toast(msg_meta, icon="✅")
 
             time.sleep(0.5)
 
@@ -1144,74 +1138,10 @@ def fill_missing_dates():
 
 
 def update_meta_yesterday():
-    """어제 메타 광고 데이터를 시트 C~H열에 업데이트. (bool, str) 반환."""
-    try:
-        from datetime import date, timedelta
-
-        # Meta 토큰 우선순위: secrets → 로컬 파일
-        meta_token = None
-        for key in ("meta_access_token", "META_ACCESS_TOKEN", "meta_token"):
-            try:
-                meta_token = st.secrets[key]
-                if meta_token:
-                    break
-            except Exception:
-                pass
-        if not meta_token:
-            _tf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta_token.txt")
-            if os.path.exists(_tf):
-                meta_token = open(_tf).read().strip()
-        if not meta_token:
-            return False, "❌ Meta 토큰 없음. Streamlit secrets에 meta_access_token을 추가해 주세요."
-
-        AD_ACCOUNT = "act_1599099620677018"
-
-        creds = _get_sheet_creds()
-        gc    = gspread.authorize(creds)
-        ws    = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
-
-        yesterday = date.today() - timedelta(days=1)
-        date_str  = yesterday.strftime("%Y-%m-%d")
-        day_label = f"{yesterday.month}/{yesterday.day}"
-
-        res = _requests.get(
-            f"https://graph.facebook.com/v25.0/{AD_ACCOUNT}/insights",
-            params={
-                "fields":     "spend,impressions,clicks,ctr,cpc,actions,purchase_roas",
-                "time_range": f'{{"since":"{date_str}","until":"{date_str}"}}',
-                "access_token": meta_token,
-            },
-            timeout=15,
-        ).json()
-
-        spend = impressions = clicks = purchases = 0
-        if res.get("data"):
-            d           = res["data"][0]
-            spend       = round(float(d.get("spend", 0)))
-            impressions = int(d.get("impressions", 0))
-            clicks      = int(d.get("clicks", 0))
-            for action in d.get("actions", []):
-                if action["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
-                    purchases = int(float(action["value"]))
-
-        all_dates = ws.col_values(1)
-        row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
-        if not row_idx:
-            # 날짜 행이 없으면 새 행 추가
-            ws.append_row([day_label], value_input_option="RAW")
-            all_dates = ws.col_values(1)
-            row_idx = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
-        if not row_idx:
-            return False, f"'{day_label}' 행 생성 실패"
-
-        ws.update(values=[[spend, impressions, clicks]], range_name=f"C{row_idx}:E{row_idx}")
-        time.sleep(0.2)
-        ws.update(values=[[purchases]], range_name=f"H{row_idx}")
-
-        return True, f"✅ Meta {day_label} 완료 — 광고비 {spend:,}원 · 전환 {purchases}건"
-
-    except Exception as e:
-        return False, f"❌ Meta 업데이트 실패: {e}"
+    """어제 메타 광고 데이터를 시트 C~J열에 업데이트. (bool, str) 반환."""
+    from datetime import date, timedelta
+    yesterday = date.today() - timedelta(days=1)
+    return update_meta_for_date(yesterday)
 
 
 def update_cafe24_yesterday():
