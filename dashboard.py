@@ -1337,42 +1337,30 @@ with col_logo:
     st.markdown("## 🏃 NOMINICAL 성과 대시보드")
 with col_refresh:
     if st.button("🔄 새로고침"):
-        st.info("🚀 데이터 업데이트 프로세스 시작...")
-
-        # Step 1: 빈 행 자동 추가
-        with st.spinner("1️⃣  비어있는 날짜 감지 및 행 추가 중..."):
+        with st.spinner("🚀 데이터 업데이트 중... 잠시만 기다려주세요."):
+            # Step 1: 빈 날짜 행 추가
             ok_gap, msg_gap = add_empty_rows_for_gaps()
 
-        if ok_gap:
-            st.toast(msg_gap, icon="✅")
-        else:
-            st.toast(msg_gap, icon="⚠️")
-
-        # Step 2: GA4 데이터 채우기
-        with st.spinner("2️⃣  GA4 데이터 조회 및 채우기 중... (시간 소요)"):
+            # Step 2: 비어있는 날짜 데이터 채우기
             ok_fill, msg_fill = fill_missing_dates()
 
-        if ok_fill:
-            st.toast(msg_fill, icon="✅")
-        else:
-            st.toast(msg_fill, icon="⚠️")
-
-        # Step 3: 기존 전일자 업데이트
-        with st.spinner("3️⃣  어제 데이터 업데이트 중..."):
+            # Step 3: 어제 데이터 업데이트
             ok1, msg1 = update_ga4_yesterday()
             ok2, msg2 = update_meta_yesterday()
 
-        if ok1:
-            st.toast(msg1, icon="✅")
+        # 결과 요약 — 성공/실패만 1회 표시
+        errors = []
+        if not ok_gap:  errors.append(msg_gap)
+        if not ok_fill: errors.append(msg_fill)
+        if not ok1:     errors.append(msg1)
+        if not ok2:     errors.append(msg2)
+
+        if errors:
+            st.toast("\n".join(errors), icon="⚠️")
         else:
-            st.toast(msg1, icon="⚠️")
-        if ok2:
-            st.toast(msg2, icon="✅")
-        else:
-            st.toast(msg2, icon="⚠️")
+            st.toast("✅ 업데이트 완료!", icon="✅")
 
         st.cache_data.clear()
-        st.success("✅ 모든 업데이트 완료!")
         st.rerun()
 
 st.markdown("---")
