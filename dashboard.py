@@ -733,6 +733,188 @@ def update_ga4_yesterday():
         return False, f"❌ GA4 업데이트 실패: {e}"
 
 
+def update_ga4_for_date(target_date):
+    """특정 날짜 GA4 데이터를 시트에 업데이트. (bool, str) 반환."""
+    if not _GA4_AVAILABLE:
+        return False, "google-analytics-data 패키지가 설치되어 있지 않아요."
+    try:
+        from datetime import date, timedelta
+
+        GA4_PROPERTY_ID = "536368183"
+        creds           = _get_oauth_creds()
+        ga4             = BetaAnalyticsDataClient(credentials=creds)
+        gc              = gspread.authorize(creds)
+        ws              = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+        # target_date가 date 객체가 아니면 변환
+        if isinstance(target_date, str):
+            parts = target_date.split("/")
+            target_date = date(2026, int(parts[0]), int(parts[1]))
+
+        date_str  = target_date.strftime("%Y-%m-%d")
+        day_label = f"{target_date.month}/{target_date.day}"
+
+        def run_report(dimensions, metrics, filter_expr=None):
+            req = RunReportRequest(
+                property=f"properties/{GA4_PROPERTY_ID}",
+                dimensions=[Dimension(name=d) for d in dimensions],
+                metrics=[Metric(name=m) for m in metrics],
+                date_ranges=[DateRange(start_date=date_str, end_date=date_str)],
+            )
+            if filter_expr:
+                req.dimension_filter = filter_expr
+            return ga4.run_report(req)
+
+        # 전체 지표
+        res = run_report(
+            ["date"],
+            ["sessions", "transactions", "bounceRate", "averagePurchaseRevenue", "purchaseRevenue"],
+        )
+        sessions = transactions = bounce = avg_price = revenue = 0
+        if res.rows:
+            r            = res.rows[0].metric_values
+            sessions     = int(float(r[0].value))
+            transactions = int(float(r[1].value))
+            bounce       = round(float(r[2].value) * 100, 1)
+            avg_price    = round(float(r[3].value))
+            revenue      = round(float(r[4].value))
+
+        def get_channel(source, medium):
+            f = FilterExpression(and_group=FilterExpressionList(expressions=[
+                FilterExpression(filter=Filter(field_name="sessionSource",
+                    string_filter=Filter.StringFilter(value=source, match_type="EXACT"))),
+                FilterExpression(filter=Filter(field_name="sessionMedium",
+                    string_filter=Filter.StringFilter(value=medium, match_type="EXACT"))),
+            ]))
+            r2 = run_report(["sessionSource"], ["sessions"], f)
+            return int(float(r2.rows[0].metric_values[0].value)) if r2.rows else 0
+
+        time.sleep(0.3)
+        ch_meta     = get_channel("meta", "paid_feed") + get_channel("ig", "paid")
+        time.sleep(0.3)
+        ch_official = get_channel("instagram", "bio")
+        time.sleep(0.3)
+        ch_personal = get_channel("instagram", "personal_bio") + get_channel("instagram", "personal_story")
+        time.sleep(0.3)
+
+        f_direct  = FilterExpression(filter=Filter(field_name="sessionMedium",
+            string_filter=Filter.StringFilter(value="(none)", match_type="EXACT")))
+        r_direct  = run_report(["sessionMedium"], ["sessions"], f_direct)
+        ch_direct = int(float(r_direct.rows[0].metric_values[0].value)) if r_direct.rows else 0
+
+        res_new        = run_report(["newVsReturning"], ["activeUsers"])
+        new_users = returning_users = 0
+        for row in res_new.rows:
+            val = int(float(row.metric_values[0].value))
+            if row.dimension_values[0].value == "new":
+                new_users = val
+            else:
+                returning_users = val
+
+        all_dates = ws.col_values(1)
+        row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
+        if not row_idx:
+            # 날짜 행이 없으면 새 행 추가
+            ws.append_row([day_label], value_input_option="RAW")
+            all_dates = ws.col_values(1)
+            row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
+
+        # 데이터 업데이트 (K~V열)
+        ws.update_cell(row_idx, 11, sessions)      # K: 방문자
+        ws.update_cell(row_idx, 12, transactions)  # L: 구매
+        ws.update_cell(row_idx, 13, bounce)        # M: 이탈율
+        ws.update_cell(row_idx, 14, avg_price)     # N: 객단가
+        ws.update_cell(row_idx, 15, revenue)       # O: 매출
+        ws.update_cell(row_idx, 16, ch_meta)       # P: 유입_메타
+        ws.update_cell(row_idx, 17, ch_official)   # Q: 유입_공식
+        ws.update_cell(row_idx, 18, ch_personal)   # R: 유입_개인
+        ws.update_cell(row_idx, 19, ch_direct)     # S: 유입_직접
+        ws.update_cell(row_idx, 20, new_users)     # T: 신규
+        ws.update_cell(row_idx, 21, returning_users) # U: 재방문
+
+        return True, f"✅ GA4 {day_label} 완료 — 방문자 {sessions:,}명 · 구매 {transactions}건"
+
+    except Exception as e:
+        return False, f"❌ GA4 업데이트 실패 ({target_date}): {e}"
+
+
+def get_last_data_date():
+    """마지막 데이터 날짜 반환 (date 객체)."""
+    from datetime import date
+    try:
+        gc = gspread.authorize(_get_oauth_creds())
+        ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        all_dates = ws.col_values(1)
+
+        for d in reversed(all_dates[1:]):  # 헤더 제외
+            d_str = str(d).strip()
+            if not d_str or "종합" in d_str or "날짜" in d_str:
+                continue
+            try:
+                parts = d_str.split("/")
+                if len(parts) == 2:
+                    month, day = int(parts[0]), int(parts[1])
+                    return date(2026, month, day)
+            except:
+                continue
+        return None
+    except Exception as e:
+        print(f"❌ 마지막 날짜 조회 실패: {e}")
+        return None
+
+
+def fill_missing_dates():
+    """비어있는 날짜들을 자동 감지하고 GA4 데이터로 채우기."""
+    from datetime import date, timedelta
+
+    print("\n🔍 비어있는 날짜 감지 중...")
+
+    last_date = get_last_data_date()
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    if not last_date:
+        return False, "마지막 데이터 날짜를 찾을 수 없어요."
+
+    print(f"   마지막 데이터: {last_date.month}/{last_date.day}")
+    print(f"   어제: {yesterday.month}/{yesterday.day}")
+
+    # 비어있는 날짜 찾기
+    missing_dates = []
+    current = last_date + timedelta(days=1)
+
+    while current <= yesterday:
+        gc = gspread.authorize(_get_oauth_creds())
+        ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        all_dates = ws.col_values(1)
+        date_label = f"{current.month}/{current.day}"
+
+        # 현재 날짜가 Google Sheets에 있는지 확인
+        found = any(d.strip() == date_label for d in all_dates)
+
+        if not found:
+            missing_dates.append(current)
+            print(f"   ❌ {date_label} 비어있음")
+        else:
+            print(f"   ✅ {date_label} 있음")
+
+        current += timedelta(days=1)
+        time.sleep(0.1)  # API 호출 제한 대비
+
+    if not missing_dates:
+        return True, "비어있는 날짜가 없어요."
+
+    print(f"\n📝 {len(missing_dates)}개 날짜에 대해 GA4 데이터 추가 중...")
+
+    # 각 비어있는 날짜에 대해 GA4 데이터 조회 & 추가
+    for d in missing_dates:
+        ok, msg = update_ga4_for_date(d)
+        print(f"   {msg}")
+        time.sleep(1)  # API 호출 제한 대비
+
+    return True, f"✅ {len(missing_dates)}개 날짜 채우기 완료!"
+
+
 def update_meta_yesterday():
     """어제 메타 광고 데이터를 시트 C~H열에 업데이트. (bool, str) 반환."""
     try:
