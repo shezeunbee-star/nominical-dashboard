@@ -1048,44 +1048,66 @@ def update_meta_for_date(target_date):
 def fill_missing_dates():
     """비어있는 날짜들을 자동 감지하고 GA4 + Meta 데이터로 채우기."""
     from datetime import date, timedelta
+    import re as _re
 
     try:
         creds = _get_oauth_creds()
         gc = gspread.authorize(creds)
         ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
 
-        # 비어있는 날짜 찾기
-        all_dates = ws.col_values(1)
+        yesterday = date.today() - timedelta(days=1)
+
+        # 시트 전체 데이터 읽기 (A~V 칼럼)
+        all_rows = ws.get("A2:V200", value_render_option="UNFORMATTED_VALUE")
+
+        # 날짜 파싱 함수 (M/D 형식)
+        def parse_md(s):
+            s = str(s).strip()
+            try:
+                parts = s.split("/")
+                if len(parts) == 2:
+                    return date(2026, int(parts[0]), int(parts[1]))
+            except:
+                pass
+            return None
+
+        # 시트에 있는 날짜와 해당 행 데이터 매핑
+        sheet_map = {}  # date → row_data
+        for row in all_rows:
+            if not row or not row[0]:
+                continue
+            d = parse_md(row[0])
+            if d:
+                sheet_map[d] = row
+
+        # 가장 오래된 날짜부터 어제까지 빠진 날짜 + 데이터 없는 날짜 모두 감지
+        if not sheet_map:
+            return False, "시트에 데이터가 없어요."
+
+        start_date = min(sheet_map.keys())
         missing_dates = []
 
-        # 6/2~6/6 직접 확인 (GA4 + Meta 모두 확인)
-        for month, day in [(6, 2), (6, 3), (6, 4), (6, 5), (6, 6)]:
-            date_label = f"{month}/{day}"
-            row_idx = None
+        check_date = start_date
+        while check_date <= yesterday:
+            row_data = sheet_map.get(check_date)
 
-            for i, d in enumerate(all_dates):
-                if str(d).strip() == date_label:
-                    row_idx = i + 1
-                    row_data = ws.row_values(row_idx)
+            if row_data is None:
+                # 날짜 자체가 없음
+                missing_dates.append(check_date)
+            else:
+                # 날짜는 있지만 GA4 또는 Meta 데이터가 비어있는지 확인
+                # GA4: K칼럼 = index 10 (방문자)
+                ga4_empty = len(row_data) < 11 or not str(row_data[10]).strip()
+                # Meta: C칼럼 = index 2 (광고비)
+                meta_empty = len(row_data) < 3 or not str(row_data[2]).strip()
 
-                    # GA4 확인: K 칼럼 (index 10)
-                    ga4_empty = len(row_data) < 11 or not str(row_data[10]).strip()
+                if ga4_empty or meta_empty:
+                    missing_dates.append(check_date)
 
-                    # Meta 확인: C, D, E, H 칼럼 (index 2, 3, 4, 7)
-                    meta_empty = (
-                        len(row_data) < 3 or not str(row_data[2]).strip() or  # C: 광고비
-                        len(row_data) < 4 or not str(row_data[3]).strip() or  # D: 노출
-                        len(row_data) < 5 or not str(row_data[4]).strip() or  # E: 클릭
-                        len(row_data) < 8 or not str(row_data[7]).strip()     # H: 전환
-                    )
-
-                    # GA4 또는 Meta 중 하나라도 비어있으면 missing
-                    if ga4_empty or meta_empty:
-                        missing_dates.append(date(2026, month, day))
-                    break
+            check_date += timedelta(days=1)
 
         if not missing_dates:
-            return True, "비어있는 날짜가 없어요."
+            return True, "✅ 갭이 없어요 (이미 모든 날짜가 있음)."
 
         # 각 날짜에 GA4 + Meta 데이터 추가
         errors = []
