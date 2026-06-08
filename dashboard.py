@@ -975,7 +975,7 @@ def update_meta_for_date(target_date):
 
         AD_ACCOUNT = "act_1599099620677018"
 
-        creds = _get_sheet_creds()
+        creds = _get_oauth_creds()
         gc    = gspread.authorize(creds)
         ws    = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
 
