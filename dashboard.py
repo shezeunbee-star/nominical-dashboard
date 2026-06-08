@@ -1006,6 +1006,10 @@ def update_meta_for_date(target_date):
             timeout=15,
         ).json()
 
+        # 디버그: API 응답 확인
+        import sys
+        print(f"[Meta API {day_label}] 응답: {res}", file=sys.stderr)
+
         spend = impressions = clicks = purchases = 0
         if res.get("data"):
             d           = res["data"][0]
@@ -1015,6 +1019,9 @@ def update_meta_for_date(target_date):
             for action in d.get("actions", []):
                 if action["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
                     purchases = int(float(action["value"]))
+            print(f"[Meta {day_label}] 추출: spend={spend}, imp={impressions}, clicks={clicks}, purchases={purchases}", file=sys.stderr)
+        else:
+            print(f"[Meta {day_label}] 'data' 없음. keys: {res.keys() if isinstance(res, dict) else 'not dict'}", file=sys.stderr)
 
         # Google Sheets에서 행 찾기
         all_dates = ws.col_values(1)
@@ -1081,20 +1088,27 @@ def fill_missing_dates():
             return True, "비어있는 날짜가 없어요."
 
         # 각 날짜에 GA4 + Meta 데이터 추가
+        errors = []
         for d in missing_dates:
             # GA4 데이터
             ok_ga4, msg_ga4 = update_ga4_for_date(d)
             if not ok_ga4:
-                return False, msg_ga4
+                errors.append(f"GA4 {d.month}/{d.day}: {msg_ga4}")
+            else:
+                st.toast(msg_ga4, icon="✅")
 
             # Meta 데이터
             ok_meta, msg_meta = update_meta_for_date(d)
             if not ok_meta:
-                # Meta 실패는 경고만 표시하고 계속
-                pass
+                errors.append(f"Meta {d.month}/{d.day}: {msg_meta}")
+                st.toast(msg_meta, icon="⚠️")
+            else:
+                st.toast(msg_meta, icon="✅")
 
             time.sleep(0.5)
 
+        if errors:
+            return True, f"✅ {len(missing_dates)}개 날짜 처리 완료\n⚠️ 에러: {chr(10).join(errors)}"
         return True, f"✅ {len(missing_dates)}개 날짜 데이터 추가 완료!"
 
     except Exception as e:
