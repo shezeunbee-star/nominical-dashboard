@@ -827,18 +827,22 @@ def update_ga4_for_date(target_date):
                     row_idx = i + 1
                     break
 
-        # 데이터 업데이트 (K~V열)
-        ws.update_cell(row_idx, 11, sessions)      # K: 방문자
-        ws.update_cell(row_idx, 12, transactions)  # L: 구매
-        ws.update_cell(row_idx, 13, bounce)        # M: 이탈율
-        ws.update_cell(row_idx, 14, avg_price)     # N: 객단가
-        ws.update_cell(row_idx, 15, revenue)       # O: 매출
-        ws.update_cell(row_idx, 16, ch_meta)       # P: 유입_메타
-        ws.update_cell(row_idx, 17, ch_official)   # Q: 유입_공식
-        ws.update_cell(row_idx, 18, ch_personal)   # R: 유입_개인
-        ws.update_cell(row_idx, 19, ch_direct)     # S: 유입_직접
-        ws.update_cell(row_idx, 20, new_users)     # T: 신규
-        ws.update_cell(row_idx, 21, returning_users) # U: 재방문
+        # 전환율 계산 (transactions / sessions × 100)
+        conv_rate = round(transactions / sessions * 100, 2) if sessions > 0 else 0
+
+        # 데이터 업데이트 (K~V열) — 헤더 기준 정확한 매핑
+        ws.update_cell(row_idx, 11, sessions)          # K: 방문자수
+        ws.update_cell(row_idx, 12, transactions)      # L: 구매자수
+        ws.update_cell(row_idx, 13, conv_rate)         # M: 전환율(%)
+        ws.update_cell(row_idx, 14, bounce)            # N: 이탈율
+        ws.update_cell(row_idx, 15, avg_price)         # O: 객단가(원)
+        ws.update_cell(row_idx, 16, revenue)           # P: 자사몰매출(원)
+        ws.update_cell(row_idx, 17, ch_meta)           # Q: 유입_메타광고
+        ws.update_cell(row_idx, 18, ch_official)       # R: 유입_공식인스타
+        ws.update_cell(row_idx, 19, ch_personal)       # S: 유입_개인인스타
+        ws.update_cell(row_idx, 20, ch_direct)         # T: 유입_직접
+        ws.update_cell(row_idx, 21, new_users)         # U: 신규방문자
+        ws.update_cell(row_idx, 22, returning_users)   # V: 재방문자
 
         return True, f"✅ GA4 {day_label} 완료 — 방문자 {sessions:,}명 · 구매 {transactions}건"
 
