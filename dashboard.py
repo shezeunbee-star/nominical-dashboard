@@ -952,8 +952,85 @@ def add_empty_rows_for_gaps():
         return False, f"❌ 빈 행 추가 실패: {e}"
 
 
+def update_meta_for_date(target_date):
+    """특정 날짜 Meta 광고 데이터를 시트에 업데이트. (bool, str) 반환."""
+    try:
+        from datetime import date
+
+        # Meta 토큰 우선순위: secrets → 로컬 파일
+        meta_token = None
+        for key in ("meta_access_token", "META_ACCESS_TOKEN", "meta_token"):
+            try:
+                meta_token = st.secrets[key]
+                if meta_token:
+                    break
+            except Exception:
+                pass
+        if not meta_token:
+            _tf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta_token.txt")
+            if os.path.exists(_tf):
+                meta_token = open(_tf).read().strip()
+        if not meta_token:
+            return False, "Meta 토큰 없음"
+
+        AD_ACCOUNT = "act_1599099620677018"
+
+        creds = _get_sheet_creds()
+        gc    = gspread.authorize(creds)
+        ws    = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+        # target_date가 date 객체가 아니면 변환
+        if isinstance(target_date, str):
+            parts = target_date.split("/")
+            target_date = date(2026, int(parts[0]), int(parts[1]))
+
+        date_str  = target_date.strftime("%Y-%m-%d")
+        day_label = f"{target_date.month}/{target_date.day}"
+
+        res = _requests.get(
+            f"https://graph.facebook.com/v25.0/{AD_ACCOUNT}/insights",
+            params={
+                "fields":     "spend,impressions,clicks,ctr,cpc,actions,purchase_roas",
+                "time_range": f'{{"since":"{date_str}","until":"{date_str}"}}',
+                "access_token": meta_token,
+            },
+            timeout=15,
+        ).json()
+
+        spend = impressions = clicks = purchases = 0
+        if res.get("data"):
+            d           = res["data"][0]
+            spend       = round(float(d.get("spend", 0)))
+            impressions = int(d.get("impressions", 0))
+            clicks      = int(d.get("clicks", 0))
+            for action in d.get("actions", []):
+                if action["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
+                    purchases = int(float(action["value"]))
+
+        # Google Sheets에서 행 찾기
+        all_dates = ws.col_values(1)
+        row_idx = None
+        for i, d in enumerate(all_dates):
+            if str(d).strip() == day_label:
+                row_idx = i + 1
+                break
+
+        if not row_idx:
+            return False, f"'{day_label}' 행을 찾을 수 없음"
+
+        # C~E, H 칼럼에 데이터 쓰기
+        ws.update(values=[[spend, impressions, clicks]], range_name=f"C{row_idx}:E{row_idx}")
+        time.sleep(0.2)
+        ws.update(values=[[purchases]], range_name=f"H{row_idx}")
+
+        return True, f"✅ Meta {day_label} 완료 — 광고비 {spend:,}원 · 전환 {purchases}건"
+
+    except Exception as e:
+        return False, f"❌ Meta 업데이트 실패 ({target_date}): {e}"
+
+
 def fill_missing_dates():
-    """비어있는 날짜들을 자동 감지하고 GA4 데이터로 채우기."""
+    """비어있는 날짜들을 자동 감지하고 GA4 + Meta 데이터로 채우기."""
     from datetime import date, timedelta
 
     try:
@@ -983,11 +1060,17 @@ def fill_missing_dates():
         if not missing_dates:
             return True, "비어있는 날짜가 없어요."
 
-        # 각 날짜에 GA4 데이터 추가
+        # 각 날짜에 GA4 + Meta 데이터 추가
         for d in missing_dates:
-            ok, msg = update_ga4_for_date(d)
-            if not ok:
-                return False, msg
+            # GA4 데이터
+            ok_ga4, msg_ga4 = update_ga4_for_date(d)
+            if not ok_ga4:
+                return False, msg_ga4
+
+            # Meta 데이터
+            ok_meta, msg_meta = update_meta_for_date(d)
+            # Meta 토큰 없으면 계속 진행 (GA4는 필수)
+
             time.sleep(0.5)
 
         return True, f"✅ {len(missing_dates)}개 날짜 데이터 추가 완료!"
