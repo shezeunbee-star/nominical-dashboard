@@ -812,12 +812,20 @@ def update_ga4_for_date(target_date):
                 returning_users = val
 
         all_dates = ws.col_values(1)
-        row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
+        row_idx   = None
+        for i, d in enumerate(all_dates):
+            if str(d).strip() == day_label:
+                row_idx = i + 1
+                break
+
         if not row_idx:
             # 날짜 행이 없으면 새 행 추가
             ws.append_row([day_label], value_input_option="RAW")
             all_dates = ws.col_values(1)
-            row_idx   = next((i + 1 for i, d in enumerate(all_dates) if d == day_label), None)
+            for i, d in enumerate(all_dates):
+                if str(d).strip() == day_label:
+                    row_idx = i + 1
+                    break
 
         # 데이터 업데이트 (K~V열)
         ws.update_cell(row_idx, 11, sessions)      # K: 방문자
