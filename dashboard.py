@@ -956,52 +956,44 @@ def fill_missing_dates():
     """비어있는 날짜들을 자동 감지하고 GA4 데이터로 채우기."""
     from datetime import date, timedelta
 
-    print("\n🔍 비어있는 날짜 감지 중...")
-
-    last_date = get_last_data_date()
-    today = date.today()
-    yesterday = today - timedelta(days=1)
-
-    if not last_date:
-        return False, "마지막 데이터 날짜를 찾을 수 없어요."
-
-    print(f"   마지막 데이터: {last_date.month}/{last_date.day}")
-    print(f"   어제: {yesterday.month}/{yesterday.day}")
-
-    # 비어있는 날짜 찾기
-    missing_dates = []
-    current = last_date + timedelta(days=1)
-
-    while current <= yesterday:
-        gc = gspread.authorize(_get_oauth_creds())
+    try:
+        creds = _get_oauth_creds()
+        gc = gspread.authorize(creds)
         ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+        # 비어있는 날짜 찾기
         all_dates = ws.col_values(1)
-        date_label = f"{current.month}/{current.day}"
+        missing_dates = []
 
-        # 현재 날짜가 Google Sheets에 있는지 확인
-        found = any(d.strip() == date_label for d in all_dates)
+        # 6/2~6/6 직접 확인
+        for month, day in [(6, 2), (6, 3), (6, 4), (6, 5), (6, 6)]:
+            date_label = f"{month}/{day}"
+            row_idx = None
 
-        if not found:
-            missing_dates.append(current)
-            print(f"   ❌ {date_label} 비어있음")
-        else:
-            print(f"   ✅ {date_label} 있음")
+            for i, d in enumerate(all_dates):
+                if str(d).strip() == date_label:
+                    row_idx = i + 1
+                    # K~V 칼럼 (11~22)에 데이터가 있는지 확인
+                    row_data = ws.row_values(row_idx)
+                    if len(row_data) < 11 or not str(row_data[10]).strip():
+                        # 데이터 없음
+                        missing_dates.append(date(2026, month, day))
+                    break
 
-        current += timedelta(days=1)
-        time.sleep(0.1)  # API 호출 제한 대비
+        if not missing_dates:
+            return True, "비어있는 날짜가 없어요."
 
-    if not missing_dates:
-        return True, "비어있는 날짜가 없어요."
+        # 각 날짜에 GA4 데이터 추가
+        for d in missing_dates:
+            ok, msg = update_ga4_for_date(d)
+            if not ok:
+                return False, msg
+            time.sleep(0.5)
 
-    print(f"\n📝 {len(missing_dates)}개 날짜에 대해 GA4 데이터 추가 중...")
+        return True, f"✅ {len(missing_dates)}개 날짜 데이터 추가 완료!"
 
-    # 각 비어있는 날짜에 대해 GA4 데이터 조회 & 추가
-    for d in missing_dates:
-        ok, msg = update_ga4_for_date(d)
-        print(f"   {msg}")
-        time.sleep(1)  # API 호출 제한 대비
-
-    return True, f"✅ {len(missing_dates)}개 날짜 채우기 완료!"
+    except Exception as e:
+        return False, f"❌ 갭 채우기 실패: {e}"
 
 
 def update_meta_yesterday():
