@@ -275,14 +275,18 @@ def load_data():
         "재방문":     ret_users.values,
     })
 
+    # CPO: 광고비 / Meta 전환수 (Meta 기준)
     result["CPO"] = result.apply(
-        lambda r: round(r["광고비"] / r["구매"]) if r["구매"] > 0 and r["광고비"] > 0 else 0, axis=1
+        lambda r: round(r["광고비"] / r["전환_메타"]) if r["전환_메타"] > 0 and r["광고비"] > 0 else 0, axis=1
     )
     result["전환율"] = result.apply(
         lambda r: round(r["구매"] / r["방문자"] * 100, 2) if r["방문자"] > 0 else 0, axis=1
     )
+    # ROAS: Meta API에서 받은 ROAS 값 우선 사용, 없으면 GA4 매출 기준 계산
     result["ROAS"] = result.apply(
-        lambda r: round(r["매출"] / r["광고비"], 2) if r["광고비"] > 0 and r["매출"] > 0 else 0, axis=1
+        lambda r: round(float(r["ROAS_메타"]), 2) if r.get("ROAS_메타", 0) > 0
+        else (round(r["매출"] / r["광고비"], 2) if r["광고비"] > 0 and r["매출"] > 0 else 0),
+        axis=1
     )
 
     def parse_date(s):
