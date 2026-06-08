@@ -198,7 +198,7 @@ def load_data():
 
     gc = gspread.authorize(creds)
     ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
-    raw = ws.get("A2:W40", value_render_option="UNFORMATTED_VALUE")
+    raw = ws.get("A2:W200", value_render_option="UNFORMATTED_VALUE")
 
     headers = raw[0]
     rows = []
