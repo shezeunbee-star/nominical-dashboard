@@ -1069,20 +1069,15 @@ def fill_missing_dates():
         if not missing_dates:
             return True, "비어있는 날짜가 없어요."
 
-        # 각 날짜에 GA4 + Meta 데이터 추가
+        # 각 날짜에 GA4 데이터 추가
         for d in missing_dates:
-            # GA4 데이터
+            # GA4 데이터만 추가 (Meta는 별도로 update_meta_yesterday()에서 처리)
             ok_ga4, msg_ga4 = update_ga4_for_date(d)
             if not ok_ga4:
                 return False, msg_ga4
-
-            # Meta 데이터
-            ok_meta, msg_meta = update_meta_for_date(d)
-            # Meta 토큰 없으면 계속 진행 (GA4는 필수)
-
             time.sleep(0.5)
 
-        return True, f"✅ {len(missing_dates)}개 날짜 데이터 추가 완료!"
+        return True, f"✅ {len(missing_dates)}개 날짜 GA4 데이터 추가 완료!"
 
     except Exception as e:
         return False, f"❌ 갭 채우기 실패: {e}"
