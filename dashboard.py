@@ -1494,8 +1494,8 @@ with tab1:
         hovertemplate="<b>%{x}</b><br>광고비: %{y:,}원<extra></extra>",
         yaxis="y3",
     ), secondary_y=False)
-    conv_df = df[df["구매"] > 0].copy()
-    # 날짜_dt → YYYY-MM-DD (Meta API 날짜 형식과 통일)
+    # 전환 발생일: Meta 전환수 OR GA4 구매 중 하나라도 있으면 표시
+    conv_df = df[(df["전환_메타"] > 0) | (df["구매"] > 0)].copy()
     conv_df["날짜_key"] = conv_df["날짜_dt"].dt.strftime("%Y-%m-%d")
 
     # ── 전환 발생일 소재 annotation ─────────────────────────────
@@ -1510,7 +1510,7 @@ with tab1:
     _hover_texts = []
     for _, _row in conv_df.iterrows():
         _date_key = str(_row["날짜_key"])  # YYYY-MM-DD
-        _total_conv = int(_row["구매"])
+        _total_conv = int(_row["전환_메타"]) if _row["전환_메타"] > 0 else int(_row["구매"])
 
         # ① 유입 경로 (GA4 채널 데이터)
         _ch_lines = []
@@ -1564,7 +1564,8 @@ with tab1:
                     _label += f" 외 {_n_others}개"
                 _label += f" ({int(_top['전환수'])}건)"
             else:
-                _label = f"전환 {int(_row['구매'])}건"
+                _conv_n = int(_row["전환_메타"]) if _row["전환_메타"] > 0 else int(_row["구매"])
+                _label = f"전환 {_conv_n}건"
             fig1.add_annotation(
                 x=_date_label, y=_vis,  # 차트 x축과 동일한 M/D 형식
                 text=_label,
