@@ -1051,7 +1051,7 @@ def fill_missing_dates():
         all_dates = ws.col_values(1)
         missing_dates = []
 
-        # 6/2~6/6 직접 확인
+        # 6/2~6/6 직접 확인 (GA4 + Meta 모두 확인)
         for month, day in [(6, 2), (6, 3), (6, 4), (6, 5), (6, 6)]:
             date_label = f"{month}/{day}"
             row_idx = None
@@ -1059,10 +1059,21 @@ def fill_missing_dates():
             for i, d in enumerate(all_dates):
                 if str(d).strip() == date_label:
                     row_idx = i + 1
-                    # K~V 칼럼 (11~22)에 데이터가 있는지 확인
                     row_data = ws.row_values(row_idx)
-                    if len(row_data) < 11 or not str(row_data[10]).strip():
-                        # 데이터 없음
+
+                    # GA4 확인: K 칼럼 (index 10)
+                    ga4_empty = len(row_data) < 11 or not str(row_data[10]).strip()
+
+                    # Meta 확인: C, D, E, H 칼럼 (index 2, 3, 4, 7)
+                    meta_empty = (
+                        len(row_data) < 3 or not str(row_data[2]).strip() or  # C: 광고비
+                        len(row_data) < 4 or not str(row_data[3]).strip() or  # D: 노출
+                        len(row_data) < 5 or not str(row_data[4]).strip() or  # E: 클릭
+                        len(row_data) < 8 or not str(row_data[7]).strip()     # H: 전환
+                    )
+
+                    # GA4 또는 Meta 중 하나라도 비어있으면 missing
+                    if ga4_empty or meta_empty:
                         missing_dates.append(date(2026, month, day))
                     break
 
