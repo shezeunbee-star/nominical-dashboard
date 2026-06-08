@@ -1650,13 +1650,14 @@ with tab1:
                     marker=dict(size=6, color=COLOR["purple"]),
                     hovertemplate="<b>%{x}</b><br>CPO: %{y:,}원<extra></extra>",
                 ), secondary_y=False)
-            # ROAS 라인 (전환 있을 때만)
-            roas_df = ad_df[ad_df["ROAS"] > 0]
-            if not roas_df.empty:
+            # ROAS 라인 — 전환 없는 날은 None으로 처리해서 선 연결 유지
+            if not ad_df.empty:
+                roas_y = ad_df["ROAS"].apply(lambda v: v if v > 0 else None)
                 fig2.add_trace(go.Scatter(
-                    x=roas_df["날짜"], y=roas_df["ROAS"],
+                    x=ad_df["날짜"], y=roas_y,
                     name="ROAS (배)",
                     mode="lines+markers",
+                    connectgaps=True,
                     line=dict(color=COLOR["green"], width=2.5),
                     marker=dict(size=7, color=COLOR["green"]),
                     hovertemplate="<b>%{x}</b><br>ROAS: %{y:.1f}배<extra></extra>",
