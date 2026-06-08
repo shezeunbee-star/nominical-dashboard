@@ -957,19 +957,28 @@ def update_meta_for_date(target_date):
     try:
         from datetime import date
 
-        # Meta 토큰 우선순위: secrets → 로컬 파일
+        # Meta 토큰 읽기: secrets.toml → 로컬 파일
         meta_token = None
-        for key in ("meta_access_token", "META_ACCESS_TOKEN", "meta_token"):
-            try:
-                meta_token = st.secrets[key]
-                if meta_token:
-                    break
-            except Exception:
-                pass
+
+        # 방법 1: secrets.toml에서 읽기
+        import re
+        try:
+            secrets_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".streamlit", "secrets.toml")
+            if os.path.exists(secrets_path):
+                with open(secrets_path, 'r') as f:
+                    content = f.read()
+                match = re.search(r'meta_access_token\s*=\s*["\']([^"\']+)["\']', content)
+                if match:
+                    meta_token = match.group(1)
+        except Exception:
+            pass
+
+        # 방법 2: meta_token.txt에서 읽기
         if not meta_token:
             _tf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta_token.txt")
             if os.path.exists(_tf):
                 meta_token = open(_tf).read().strip()
+
         if not meta_token:
             return False, "Meta 토큰 없음"
 
