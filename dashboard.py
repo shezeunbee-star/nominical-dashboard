@@ -1194,9 +1194,31 @@ with col_logo:
     st.markdown("## 🏃 NOMINICAL 성과 대시보드")
 with col_refresh:
     if st.button("🔄 새로고침"):
-        with st.spinner("전일자 데이터 업데이트 중..."):
+        st.info("🚀 데이터 업데이트 프로세스 시작...")
+
+        # Step 1: 빈 행 자동 추가
+        with st.spinner("1️⃣  비어있는 날짜 감지 및 행 추가 중..."):
+            ok_gap, msg_gap = add_empty_rows_for_gaps()
+
+        if ok_gap:
+            st.toast(msg_gap, icon="✅")
+        else:
+            st.toast(msg_gap, icon="⚠️")
+
+        # Step 2: GA4 데이터 채우기
+        with st.spinner("2️⃣  GA4 데이터 조회 및 채우기 중... (시간 소요)"):
+            ok_fill, msg_fill = fill_missing_dates()
+
+        if ok_fill:
+            st.toast(msg_fill, icon="✅")
+        else:
+            st.toast(msg_fill, icon="⚠️")
+
+        # Step 3: 기존 전일자 업데이트
+        with st.spinner("3️⃣  어제 데이터 업데이트 중..."):
             ok1, msg1 = update_ga4_yesterday()
             ok2, msg2 = update_meta_yesterday()
+
         if ok1:
             st.toast(msg1, icon="✅")
         else:
@@ -1205,7 +1227,9 @@ with col_refresh:
             st.toast(msg2, icon="✅")
         else:
             st.toast(msg2, icon="⚠️")
+
         st.cache_data.clear()
+        st.success("✅ 모든 업데이트 완료!")
         st.rerun()
 
 st.markdown("---")
