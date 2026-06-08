@@ -30,7 +30,7 @@ SPREADSHEET_ID      = "1y9mZirj81sR2tkkGV_wTzFvJonPdJU-JuErSRDo_73E"
 SHEET_NAME          = "📅 일별 트래킹"
 PLATFORM_SHEET_NAME = "🏬 플랫폼 매출"
 SA_FILE             = "/Users/kimeunbee/Documents/지표분析/service_account.json"
-TOKEN_FILE          = "/Users/kimeunbee/Documents/지표분析/token.json"
+TOKEN_FILE          = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
 
 COLOR = {
     "primary":    "#1A1A1A",
@@ -1141,7 +1141,7 @@ with tab1:
         height=360, margin=dict(l=0, r=0, t=10, b=0),
         plot_bgcolor="white", paper_bgcolor="white",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+        xaxis=dict(type="category", showgrid=False, tickfont=dict(size=11)),
         yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="방문자수"),
         hovermode="x unified", barmode="overlay",
     )
@@ -1228,7 +1228,7 @@ with tab1:
                 height=300, margin=dict(l=0, r=0, t=10, b=0),
                 plot_bgcolor="white", paper_bgcolor="white",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+                xaxis=dict(type="category", showgrid=False, tickfont=dict(size=11)),
                 yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), tickformat=","),
                 yaxis2=dict(showgrid=False, tickfont=dict(size=11)),
                 hovermode="x unified",
@@ -1318,7 +1318,7 @@ with tab1:
             height=300, margin=dict(l=0, r=0, t=10, b=0),
             plot_bgcolor="white", paper_bgcolor="white", barmode="stack",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+            xaxis=dict(type="category", showgrid=False, tickfont=dict(size=11)),
             yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="방문자수"),
             yaxis2=dict(showgrid=False, tickfont=dict(size=11), title="누적 모수"),
             hovermode="x unified",
@@ -1361,7 +1361,7 @@ with tab1:
                 margin=dict(l=0, r=0, t=10, b=0),
                 plot_bgcolor="white", paper_bgcolor="white",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+                xaxis=dict(type="category", showgrid=False, tickfont=dict(size=11)),
                 yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11)),
                 hovermode="x unified",
             )
@@ -2321,7 +2321,7 @@ with tab4:
             height=260, margin=dict(l=0, r=0, t=10, b=0),
             plot_bgcolor="white", paper_bgcolor="white",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+            xaxis=dict(type="category", showgrid=False, tickfont=dict(size=11)),
             yaxis=dict(showgrid=True, gridcolor="#F0F0F0", title="도달"),
             yaxis2=dict(overlaying="y", side="right", showgrid=False, title="반응"),
             hovermode="x unified",
