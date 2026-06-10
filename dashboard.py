@@ -925,11 +925,14 @@ def add_empty_rows_for_gaps():
 
         print(f"   추가할 날짜: {sorted([f'{d.month}/{d.day}' for d in dates_needed])}")
 
-        # 날짜별로 정렬해서 올바른 위치에 행 삽입
+        # 날짜별로 정렬해서 올바른 위치에 행 삽입/추가
         sorted_dates = sorted(dates_needed)
+        max_existing = max(date_to_row.keys()) if date_to_row else None
 
         for insert_date in sorted_dates:
-            # 이 날짜가 들어갈 위치 찾기
+            date_label = f"{insert_date.month}/{insert_date.day}"
+
+            # 기존 날짜보다 뒤면 append, 중간이면 insert
             insert_row = None
             for check_date in sorted(date_to_row.keys()):
                 if check_date > insert_date:
@@ -937,21 +940,22 @@ def add_empty_rows_for_gaps():
                     break
 
             if insert_row is None:
-                # 맨 뒤에 추가
-                insert_row = len(all_dates) + 1
+                # 맨 뒤에 append
+                ws.append_row([date_label], value_input_option="RAW")
+                # append 후 실제 행번호 파악
+                new_all = ws.col_values(1)
+                for i, v in enumerate(new_all, start=1):
+                    if str(v).strip() == date_label:
+                        date_to_row[insert_date] = i
+            else:
+                # 중간에 insert
+                ws.insert_row([date_label], index=insert_row)
+                for d in list(date_to_row.keys()):
+                    if date_to_row[d] >= insert_row:
+                        date_to_row[d] += 1
+                date_to_row[insert_date] = insert_row
 
-            # 행 삽입 (날짜만 입력)
-            date_label = f"{insert_date.month}/{insert_date.day}"
-            ws.insert_row([date_label], index=insert_row)
-
-            # date_to_row 업데이트 (뒤의 행들 번호 변경)
-            for d in list(date_to_row.keys()):
-                if date_to_row[d] >= insert_row:
-                    date_to_row[d] += 1
-            date_to_row[insert_date] = insert_row
-
-            print(f"   ✅ {date_label} 행 추가 (row {insert_row})")
-            time.sleep(0.2)
+            time.sleep(0.5)
 
         return True, f"✅ {len(sorted_dates)}개 빈 행 추가 완료!"
 
