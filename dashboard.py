@@ -908,10 +908,11 @@ def add_empty_rows_for_gaps():
         if not date_objects:
             return False, "데이터가 없어요."
 
-        # 갭 찾기
+        # 갭 찾기 (기존 범위 내 갭 + 어제까지 신규 날짜)
         dates_needed = set()
         min_date = min(date_objects)
-        max_date = max(date_objects)
+        yesterday = date.today() - timedelta(days=1)
+        max_date  = max(max(date_objects), yesterday)  # 어제까지 체크
 
         current = min_date
         while current <= max_date:
@@ -2339,8 +2340,8 @@ with tab3:
         st.markdown("### 📅 기간별 매출 조회")
 
         t3_min_date = df_platform_all["주문일_dt"].min().date()
-        t3_max_date = df_platform_all["주문일_dt"].max().date()
         t3_today    = pd.Timestamp.now().date()
+        t3_max_date = max(df_platform_all["주문일_dt"].max().date(), t3_today)  # 오늘 이후도 허용
 
         # ── 빠른 기간 선택 버튼 ──────────────────────────────────
         b1, b2, b3, b4, b5 = st.columns(5)
