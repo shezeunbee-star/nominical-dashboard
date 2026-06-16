@@ -36,12 +36,15 @@ def ensure_header():
         print("  헤더 작성 완료")
 
 def get_existing_keys():
-    """중복 방지용 기존 데이터 키 (플랫폼+주문일+상품코드+컬러+사이즈) 수집"""
+    """중복 방지용 기존 데이터 키 (플랫폼+주문일+상품코드+컬러+사이즈+수량) 수집
+    - 같은 날 같은 상품을 다른 사람이 주문해도 별도 건으로 처리하기 위해 수량 포함
+    """
     all_rows = ws.get_all_values()
-    keys = set()
+    keys = {}  # key → count (같은 키가 몇 번 등장했는지)
     for row in all_rows[1:]:
-        if len(row) >= 6:
-            keys.add(f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}")
+        if len(row) >= 7:
+            k = f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}|{row[6]}"
+            keys[k] = keys.get(k, 0) + 1
     return keys
 
 # ── 컬러/사이즈 파서 ─────────────────────────────────────────────
@@ -362,11 +365,16 @@ def main(files):
             rows = []
 
         added = 0
+        # 파일 내 동일 키 카운트 (같은 파일에서 동일 상품 여러 건 처리)
+        file_key_count = {}
         for row in rows:
-            key = f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}"
-            if key not in existing:
+            key = f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}|{row[6]}"
+            file_key_count[key] = file_key_count.get(key, 0) + 1
+            # 시트에 이미 같은 키가 file_key_count[key]번 이상 있으면 중복
+            existing_count = existing.get(key, 0)
+            if file_key_count[key] > existing_count:
                 all_new.append(row)
-                existing.add(key)
+                existing[key] = existing.get(key, 0) + 1
                 added += 1
         print(f"  ✅ {added}건 추가 ({len(rows)-added}건 중복 스킵)")
 
