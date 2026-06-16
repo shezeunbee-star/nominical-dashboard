@@ -505,9 +505,9 @@ def load_ig_profile(account_name: str):
 
             # 미디어 타입별 인사이트 지표
             if mtype in ("VIDEO", "REEL"):
-                metrics = "reach,saved,total_interactions,views,ig_reels_avg_watch_time"
+                metrics = "reach,saved,total_interactions,shares,views,ig_reels_avg_watch_time"
             else:
-                metrics = "reach,saved,total_interactions"
+                metrics = "reach,saved,total_interactions,shares"
 
             ins_r = _requests.get(f"{base}/{mid}/insights", params={
                 "metric": metrics, "access_token": token,
@@ -524,6 +524,7 @@ def load_ig_profile(account_name: str):
                 "댓글":        item.get("comments_count", 0),
                 "도달":        ins.get("reach", 0),
                 "저장":        ins.get("saved", 0),
+                "공유":        ins.get("shares", 0),
                 "반응":        ins.get("total_interactions", 0),
                 "조회수":      ins.get("views", 0),
                 "평균시청(s)": round(ins.get("ig_reels_avg_watch_time", 0) / 1000, 1) if ins.get("ig_reels_avg_watch_time") else 0,
@@ -2729,6 +2730,7 @@ with tab4:
                 {_td2(f"{_r['댓글']:,}")}
                 {_td2(f"{int(_r['도달']):,}")}
                 {_td2(f"{int(_r['저장']):,}")}
+                {_td2(f"{int(_r['공유']):,}" if _r['공유'] > 0 else "—")}
                 {_td2(f"{_r['ER']:.2f}%", _er_color)}
                 {_td2(f"{int(_r['조회수']):,}" if _r['조회수'] > 0 else "—")}
             </tr>"""
@@ -2738,7 +2740,7 @@ with tab4:
         <table style='width:100%;border-collapse:collapse;'>
             <thead><tr>
                 {_th2('썸네일')}{_th2('날짜')}{_th2('내용')}
-                {_th2('좋아요')}{_th2('댓글')}{_th2('도달')}{_th2('저장')}{_th2('ER(%)')}{_th2('조회수')}
+                {_th2('좋아요')}{_th2('댓글')}{_th2('도달')}{_th2('저장')}{_th2('공유')}{_th2('ER(%)')}{_th2('조회수')}
             </tr></thead>
             <tbody>{_rows_html2}</tbody>
         </table></div>""", unsafe_allow_html=True)
