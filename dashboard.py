@@ -409,6 +409,86 @@ def load_meta_ad_insights(date_preset="last_30d"):
 
 
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
+def load_meta_creative_fatigue():
+    """소재별 최근 7일 CTR 추이로 피로도 분석. 교체 필요 소재 목록 반환."""
+    try:
+        import re as _re
+        meta_token = None
+        for key in ("meta_access_token", "META_ACCESS_TOKEN", "meta_token"):
+            try:
+                meta_token = st.secrets[key]
+                if meta_token: break
+            except Exception: pass
+        if not meta_token:
+            _tf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta_token.txt")
+            if os.path.exists(_tf):
+                meta_token = open(_tf).read().strip()
+        if not meta_token:
+            return []
+
+        resp = _requests.get(
+            "https://graph.facebook.com/v25.0/act_1599099620677018/insights",
+            params={
+                "level": "ad",
+                "fields": "ad_name,campaign_name,spend,impressions,clicks,ctr",
+                "date_preset": "last_14d",
+                "time_increment": 1,
+                "limit": 500,
+                "access_token": meta_token,
+            }, timeout=20,
+        ).json()
+
+        # 소재별 일별 CTR 수집
+        ad_daily = {}
+        for d in resp.get("data", []):
+            name  = d.get("ad_name", "-")
+            spend = float(d.get("spend", 0))
+            ctr   = float(d.get("ctr", 0))
+            date  = d.get("date_start", "")
+            if spend < 100: continue  # 소액 집행일 제외
+            if name not in ad_daily:
+                ad_daily[name] = {"days": [], "campaign": d.get("campaign_name","")}
+            ad_daily[name]["days"].append({"date": date, "ctr": ctr, "spend": spend})
+
+        # 소재별 피로도 판단
+        fatigued = []
+        for name, info in ad_daily.items():
+            days = sorted(info["days"], key=lambda x: x["date"])
+            if len(days) < 3: continue
+            ctrs = [d["ctr"] for d in days]
+            peak = max(ctrs)
+            last = ctrs[-1]
+            last3_avg = sum(ctrs[-3:]) / 3
+            first3_avg = sum(ctrs[:3]) / 3
+            drop_from_peak = (peak - last) / peak * 100 if peak > 0 else 0
+            trend_drop = first3_avg > 0 and last3_avg < first3_avg * 0.8
+
+            level = None
+            reason = ""
+            if last < 3.0 or drop_from_peak >= 50:
+                level = "critical"
+                reason = f"CTR {last:.1f}% (피크 {peak:.1f}% 대비 {drop_from_peak:.0f}%↓)"
+            elif drop_from_peak >= 30 or trend_drop:
+                level = "warning"
+                reason = f"CTR {last:.1f}% (피크 {peak:.1f}% 대비 {drop_from_peak:.0f}%↓)"
+
+            if level:
+                fatigued.append({
+                    "소재명": name,
+                    "캠페인": info["campaign"],
+                    "level": level,
+                    "reason": reason,
+                    "집행일수": len(days),
+                })
+
+        # critical 먼저, 그 다음 warning 순
+        fatigued.sort(key=lambda x: 0 if x["level"] == "critical" else 1)
+        return fatigued
+    except Exception:
+        return []
+
+
 def load_meta_daily_creative(date_preset="last_30d"):
     """날짜별 소재(Ad) 전환 데이터. 차트 annotation용. TTL=1시간."""
     try:
@@ -1554,72 +1634,64 @@ with tab1:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 소재 피로도 알림 배너 ────────────────────────────────────────
-    _ad_alert_df = df[df["광고비"] > 0].copy()
-    if len(_ad_alert_df) >= 3:
-        _ctr_series   = _ad_alert_df[_ad_alert_df["CTR"] > 0]["CTR"]
-        _cpc_series   = _ad_alert_df[_ad_alert_df["CPC"] > 0]["CPC"]
+    _fatigued_ads = load_meta_creative_fatigue()
+    if _fatigued_ads:
+        _critical_ads = [a for a in _fatigued_ads if a["level"] == "critical"]
+        _warning_ads  = [a for a in _fatigued_ads if a["level"] == "warning"]
 
-        if len(_ctr_series) >= 3:
-            _ctr_last   = float(_ctr_series.iloc[-1])
-            _ctr_peak   = float(_ctr_series.max())
-            _ctr_avg    = float(_ctr_series.tail(7).mean())
-            _ctr_drop   = round((_ctr_peak - _ctr_last) / _ctr_peak * 100, 1) if _ctr_peak > 0 else 0
-            _ctr_3d     = float(_ctr_series.tail(3).mean())
-            _ctr_prev3  = float(_ctr_series.iloc[-6:-3].mean()) if len(_ctr_series) >= 6 else _ctr_avg
-
-            _cpc_last   = float(_cpc_series.iloc[-1]) if len(_cpc_series) > 0 else 0
-            _cpc_avg    = float(_cpc_series.tail(7).mean()) if len(_cpc_series) > 0 else 0
-            _cpc_rise   = round((_cpc_last - _cpc_avg) / _cpc_avg * 100, 1) if _cpc_avg > 0 else 0
-
-            # 피로도 레벨 판단
-            _fatigue_level = None
-            _fatigue_msg   = ""
-            _fatigue_sub   = ""
-
-            if _ctr_last < 3.0 or _ctr_drop >= 50:
-                _fatigue_level = "critical"
-                _fatigue_msg   = "🚨 소재 교체 필요"
-                _fatigue_sub   = f"현재 CTR {_ctr_last:.1f}% — 피크({_ctr_peak:.1f}%) 대비 {_ctr_drop:.0f}% 하락. 즉시 소재 교체를 권장합니다."
-            elif (_ctr_last < 5.0 and _ctr_3d < _ctr_prev3) or _ctr_drop >= 30 or _cpc_rise >= 15:
-                _fatigue_level = "warning"
-                _fatigue_msg   = "⚠️ 소재 피로도 감지"
-                reasons = []
-                if _ctr_drop >= 30:
-                    reasons.append(f"CTR 피크 대비 {_ctr_drop:.0f}% 하락")
-                if _cpc_rise >= 15:
-                    reasons.append(f"CPC {_cpc_rise:.0f}% 상승")
-                if _ctr_3d < _ctr_prev3:
-                    reasons.append(f"최근 3일 CTR 하락 추세")
-                _fatigue_sub = " · ".join(reasons) + f" — 3~5일 내 소재 교체를 준비하세요."
-
-            if _fatigue_level == "critical":
-                st.markdown(f"""
-                <div style='background:#FFF0F0;border-left:4px solid #E74C3C;border-radius:6px;
-                            padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;'>
+        if _critical_ads:
+            _rows_html = "".join([
+                f"<div style='margin-top:6px;'>"
+                f"<span style='background:#E74C3C;color:white;font-size:11px;font-weight:700;"
+                f"padding:2px 7px;border-radius:3px;margin-right:8px;'>교체 필요</span>"
+                f"<span style='font-size:13px;font-weight:600;color:#1A1A1A;'>{a['소재명'][:40]}</span>"
+                f"<span style='font-size:12px;color:#888;margin-left:8px;'>{a['reason']} · {a['집행일수']}일 집행</span>"
+                f"</div>"
+                for a in _critical_ads
+            ])
+            st.markdown(f"""
+            <div style='background:#FFF0F0;border-left:4px solid #E74C3C;border-radius:6px;
+                        padding:14px 18px;margin-bottom:12px;'>
+                <div style='display:flex;justify-content:space-between;align-items:flex-start;'>
                     <div>
-                        <span style='font-size:15px;font-weight:700;color:#C0392B;'>{_fatigue_msg}</span>
-                        <span style='font-size:13px;color:#555;margin-left:12px;'>{_fatigue_sub}</span>
+                        <span style='font-size:15px;font-weight:700;color:#C0392B;'>🚨 소재 교체 필요</span>
+                        <span style='font-size:12px;color:#888;margin-left:10px;'>아래 소재의 CTR이 급락했어요. 즉시 교체를 권장합니다.</span>
                     </div>
                     <a href='https://business.facebook.com/adsmanager' target='_blank'
                        style='background:#E74C3C;color:white;padding:7px 14px;border-radius:5px;
-                              font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;margin-left:16px;'>
-                       🔄 소재 교체하기
+                              font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0;margin-left:16px;'>
+                       🔄 광고 관리자 열기
                     </a>
-                </div>""", unsafe_allow_html=True)
-            elif _fatigue_level == "warning":
-                st.markdown(f"""
-                <div style='background:#FFFBF0;border-left:4px solid #F39C12;border-radius:6px;
-                            padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;'>
+                </div>
+                {_rows_html}
+            </div>""", unsafe_allow_html=True)
+
+        if _warning_ads:
+            _rows_html = "".join([
+                f"<div style='margin-top:6px;'>"
+                f"<span style='background:#F39C12;color:white;font-size:11px;font-weight:700;"
+                f"padding:2px 7px;border-radius:3px;margin-right:8px;'>주의</span>"
+                f"<span style='font-size:13px;font-weight:600;color:#1A1A1A;'>{a['소재명'][:40]}</span>"
+                f"<span style='font-size:12px;color:#888;margin-left:8px;'>{a['reason']} · {a['집행일수']}일 집행</span>"
+                f"</div>"
+                for a in _warning_ads
+            ])
+            st.markdown(f"""
+            <div style='background:#FFFBF0;border-left:4px solid #F39C12;border-radius:6px;
+                        padding:14px 18px;margin-bottom:12px;'>
+                <div style='display:flex;justify-content:space-between;align-items:flex-start;'>
                     <div>
-                        <span style='font-size:15px;font-weight:700;color:#D35400;'>{_fatigue_msg}</span>
-                        <span style='font-size:13px;color:#555;margin-left:12px;'>{_fatigue_sub}</span>
+                        <span style='font-size:15px;font-weight:700;color:#D35400;'>⚠️ 소재 피로도 감지</span>
+                        <span style='font-size:12px;color:#888;margin-left:10px;'>3~5일 내 소재 교체를 준비하세요.</span>
                     </div>
                     <a href='https://business.facebook.com/adsmanager' target='_blank'
                        style='background:#F39C12;color:white;padding:7px 14px;border-radius:5px;
-                              font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;margin-left:16px;'>
-                       🔄 소재 준비하기
+                              font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0;margin-left:16px;'>
+                       🔄 광고 관리자 열기
                     </a>
-                </div>""", unsafe_allow_html=True)
+                </div>
+                {_rows_html}
+            </div>""", unsafe_allow_html=True)
 
     # 차트 2+3: 광고 효율 & 채널 유입
     col_left, col_right = st.columns([3, 2])
