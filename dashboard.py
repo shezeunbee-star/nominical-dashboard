@@ -1553,6 +1553,74 @@ with tab1:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # ── 소재 피로도 알림 배너 ────────────────────────────────────────
+    _ad_alert_df = df[df["광고비"] > 0].copy()
+    if len(_ad_alert_df) >= 3:
+        _ctr_series   = _ad_alert_df[_ad_alert_df["CTR"] > 0]["CTR"]
+        _cpc_series   = _ad_alert_df[_ad_alert_df["CPC"] > 0]["CPC"]
+
+        if len(_ctr_series) >= 3:
+            _ctr_last   = float(_ctr_series.iloc[-1])
+            _ctr_peak   = float(_ctr_series.max())
+            _ctr_avg    = float(_ctr_series.tail(7).mean())
+            _ctr_drop   = round((_ctr_peak - _ctr_last) / _ctr_peak * 100, 1) if _ctr_peak > 0 else 0
+            _ctr_3d     = float(_ctr_series.tail(3).mean())
+            _ctr_prev3  = float(_ctr_series.iloc[-6:-3].mean()) if len(_ctr_series) >= 6 else _ctr_avg
+
+            _cpc_last   = float(_cpc_series.iloc[-1]) if len(_cpc_series) > 0 else 0
+            _cpc_avg    = float(_cpc_series.tail(7).mean()) if len(_cpc_series) > 0 else 0
+            _cpc_rise   = round((_cpc_last - _cpc_avg) / _cpc_avg * 100, 1) if _cpc_avg > 0 else 0
+
+            # 피로도 레벨 판단
+            _fatigue_level = None
+            _fatigue_msg   = ""
+            _fatigue_sub   = ""
+
+            if _ctr_last < 3.0 or _ctr_drop >= 50:
+                _fatigue_level = "critical"
+                _fatigue_msg   = "🚨 소재 교체 필요"
+                _fatigue_sub   = f"현재 CTR {_ctr_last:.1f}% — 피크({_ctr_peak:.1f}%) 대비 {_ctr_drop:.0f}% 하락. 즉시 소재 교체를 권장합니다."
+            elif (_ctr_last < 5.0 and _ctr_3d < _ctr_prev3) or _ctr_drop >= 30 or _cpc_rise >= 15:
+                _fatigue_level = "warning"
+                _fatigue_msg   = "⚠️ 소재 피로도 감지"
+                reasons = []
+                if _ctr_drop >= 30:
+                    reasons.append(f"CTR 피크 대비 {_ctr_drop:.0f}% 하락")
+                if _cpc_rise >= 15:
+                    reasons.append(f"CPC {_cpc_rise:.0f}% 상승")
+                if _ctr_3d < _ctr_prev3:
+                    reasons.append(f"최근 3일 CTR 하락 추세")
+                _fatigue_sub = " · ".join(reasons) + f" — 3~5일 내 소재 교체를 준비하세요."
+
+            if _fatigue_level == "critical":
+                st.markdown(f"""
+                <div style='background:#FFF0F0;border-left:4px solid #E74C3C;border-radius:6px;
+                            padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;'>
+                    <div>
+                        <span style='font-size:15px;font-weight:700;color:#C0392B;'>{_fatigue_msg}</span>
+                        <span style='font-size:13px;color:#555;margin-left:12px;'>{_fatigue_sub}</span>
+                    </div>
+                    <a href='https://business.facebook.com/adsmanager' target='_blank'
+                       style='background:#E74C3C;color:white;padding:7px 14px;border-radius:5px;
+                              font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;margin-left:16px;'>
+                       🔄 소재 교체하기
+                    </a>
+                </div>""", unsafe_allow_html=True)
+            elif _fatigue_level == "warning":
+                st.markdown(f"""
+                <div style='background:#FFFBF0;border-left:4px solid #F39C12;border-radius:6px;
+                            padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;'>
+                    <div>
+                        <span style='font-size:15px;font-weight:700;color:#D35400;'>{_fatigue_msg}</span>
+                        <span style='font-size:13px;color:#555;margin-left:12px;'>{_fatigue_sub}</span>
+                    </div>
+                    <a href='https://business.facebook.com/adsmanager' target='_blank'
+                       style='background:#F39C12;color:white;padding:7px 14px;border-radius:5px;
+                              font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;margin-left:16px;'>
+                       🔄 소재 준비하기
+                    </a>
+                </div>""", unsafe_allow_html=True)
+
     # 차트 2+3: 광고 효율 & 채널 유입
     col_left, col_right = st.columns([3, 2])
 
