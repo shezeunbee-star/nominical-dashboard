@@ -1502,6 +1502,8 @@ with tab1:
         line=dict(color=COLOR["blue"], width=2),
         hovertemplate="<b>%{x}</b><br>방문자: %{y:,}명<extra></extra>",
     ), secondary_y=False)
+    # secondary_y 파라미터를 주면 Plotly가 yaxis="y3" 지정을 무시하고 "y"로 덮어씀
+    # → secondary_y 없이 add_trace 호출해서 yaxis="y3"가 그대로 적용되게 함
     fig1.add_trace(go.Bar(
         x=df["날짜"], y=df["광고비"],
         name="광고비",
@@ -1510,7 +1512,7 @@ with tab1:
         marker_line_width=1,
         hovertemplate="<b>%{x}</b><br>광고비: %{y:,}원<extra></extra>",
         yaxis="y3",
-    ), secondary_y=False)
+    ))
     # 전환 발생일: Meta 전환수 OR GA4 구매 중 하나라도 있으면 표시
     conv_df = df[(df["전환_메타"] > 0) | (df["구매"] > 0)].copy()
     conv_df["날짜_key"] = conv_df["날짜_dt"].dt.strftime("%Y-%m-%d")
