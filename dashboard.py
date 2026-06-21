@@ -2124,13 +2124,19 @@ with tab2:
         st.stop()
 
     # ── 기간 필터 ─────────────────────────────────────────────────
+    # 월별 목록
+    _valid_months = df_platform_all[df_platform_all["주문월"].str.strip() != ""]["주문월"].dropna().unique().tolist()
+    pf_months = sorted(
+        _valid_months,
+        key=lambda x: df_platform_all[df_platform_all["주문월"]==x]["주문일_dt"].min()
+    )
     # 주차 목록 (주차별 필터 옵션)
     _valid_weeks = df_platform_all[df_platform_all["주차"].str.strip() != ""]["주차"].dropna().unique().tolist()
     pf_weeks = sorted(
         _valid_weeks,
         key=lambda x: df_platform_all[df_platform_all["주차"]==x]["주문일_dt"].min()
     )
-    _preset_options = ["전체 기간", "최근 7일", "최근 30일"] + pf_weeks
+    _preset_options = ["전체 기간", "최근 7일", "최근 30일"] + pf_months + pf_weeks
 
     col_pf1, col_pf2, col_pf3 = st.columns([2, 2, 4])
     with col_pf1:
@@ -2139,7 +2145,7 @@ with tab2:
             _preset_options,
             label_visibility="collapsed",
             key="tab2_preset",
-            help="주차별 선택 시 해당 주 데이터만 표시"
+            help="월별/주차별 선택 시 해당 기간 데이터만 표시"
         )
     with col_pf2:
         order_count = len(df_platform_all)
@@ -2151,6 +2157,8 @@ with tab2:
     now = pd.Timestamp.now()
     if pf_preset == "전체 기간":
         pf = df_platform_all.copy()
+    elif pf_preset in pf_months:
+        pf = df_platform_all[df_platform_all["주문월"] == pf_preset].copy()
     elif pf_preset in pf_weeks:
         pf = df_platform_all[df_platform_all["주차"] == pf_preset].copy()
     elif pf_preset == "최근 7일":
