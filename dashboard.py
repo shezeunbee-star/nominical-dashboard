@@ -1494,14 +1494,8 @@ with tab1:
     chart_container("일별 방문자 · 전환 추이", "바이럴 스파이크, 광고 집행일, 전환 발생 패턴을 한눈에")
 
     fig1 = make_subplots(specs=[[{"secondary_y": True}]])
-    fig1.add_trace(go.Scatter(
-        x=df["날짜"], y=df["방문자"],
-        name="방문자",
-        fill="tozeroy",
-        fillcolor="rgba(79,142,247,0.12)",
-        line=dict(color=COLOR["blue"], width=2),
-        hovertemplate="<b>%{x}</b><br>방문자: %{y:,}명<extra></extra>",
-    ), secondary_y=False)
+    # 트레이스 추가 순서 = 그려지는 순서(나중 추가 = 위에 표시)
+    # 광고비를 먼저 그려서 뒤로 보내고, 방문자·전환수를 나중에 그려서 앞에 보이게 함
     # secondary_y 파라미터를 주면 Plotly가 yaxis="y3" 지정을 무시하고 "y"로 덮어씀
     # → secondary_y 없이 add_trace 호출해서 yaxis="y3"가 그대로 적용되게 함
     fig1.add_trace(go.Bar(
@@ -1513,6 +1507,14 @@ with tab1:
         hovertemplate="<b>%{x}</b><br>광고비: %{y:,}원<extra></extra>",
         yaxis="y3",
     ))
+    fig1.add_trace(go.Scatter(
+        x=df["날짜"], y=df["방문자"],
+        name="방문자",
+        fill="tozeroy",
+        fillcolor="rgba(79,142,247,0.12)",
+        line=dict(color=COLOR["blue"], width=2),
+        hovertemplate="<b>%{x}</b><br>방문자: %{y:,}명<extra></extra>",
+    ), secondary_y=False)
     # 전환 발생일: Meta 전환수 OR GA4 구매 중 하나라도 있으면 표시
     conv_df = df[(df["전환_메타"] > 0) | (df["구매"] > 0)].copy()
     conv_df["날짜_key"] = conv_df["날짜_dt"].dt.strftime("%Y-%m-%d")
