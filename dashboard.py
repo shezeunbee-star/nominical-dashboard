@@ -1614,6 +1614,10 @@ with tab1:
     _conv_max = int(_conv_vals_full.max()) if len(_conv_vals_full) else 0
     _conv_range = [0, max(_conv_max * 1.5, 2)]
 
+    # 광고비 전용 축 범위 — 방문자/전환수와 분리된 독립 스케일 (숨김 축)
+    _spend_max = float(df["광고비"].max()) if len(df) else 0
+    _spend_range = [0, max(_spend_max * 1.3, 1)]
+
     fig1.update_layout(
         height=360, margin=dict(l=0, r=0, t=10, b=0),
         plot_bgcolor="white", paper_bgcolor="white",
@@ -1628,6 +1632,12 @@ with tab1:
         title="전환수", range=_conv_range,
         dtick=1 if _conv_max <= 6 else None,
         tickfont=dict(size=11),
+    ))
+    # 광고비는 방문자/전환수와 별개의 숨김 축(y3)을 명시적으로 등록해야
+    # 방문자 축 범위 축소의 영향을 받지 않음 (anchor="free" 필요)
+    fig1.update_layout(yaxis3=dict(
+        overlaying="y", side="right", visible=False, showgrid=False,
+        range=_spend_range, anchor="free", position=1.0,
     ))
     st.plotly_chart(fig1, use_container_width=True)
 
