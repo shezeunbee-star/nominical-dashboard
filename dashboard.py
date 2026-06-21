@@ -410,8 +410,9 @@ def load_meta_ad_insights(date_preset="last_30d"):
 
 @st.cache_data(ttl=3600)
 @st.cache_data(ttl=3600)
-def load_meta_creative_fatigue():
-    """소재별 최근 7일 CTR 추이로 피로도 분석. 교체 필요 소재 목록 반환."""
+def load_meta_creative_fatigue(date_preset="last_14d"):
+    """소재별 CTR 추이로 피로도 분석. 교체 필요 소재 목록 반환.
+    date_preset: '광고 소재별 성과' 섹션의 기간 선택과 동일한 값을 받아 동기화."""
     try:
         import re as _re
         meta_token = None
@@ -432,7 +433,7 @@ def load_meta_creative_fatigue():
             params={
                 "level": "ad",
                 "fields": "ad_name,campaign_name,spend,impressions,clicks,ctr",
-                "date_preset": "last_14d",
+                "date_preset": date_preset,
                 "time_increment": 1,
                 "limit": 500,
                 "access_token": meta_token,
@@ -1634,7 +1635,10 @@ with tab1:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 소재 피로도 알림 배너 ────────────────────────────────────────
-    _fatigued_ads = load_meta_creative_fatigue()
+    # '광고 소재별 성과' 섹션의 기간 선택(아래쪽)과 동일한 값으로 동기화
+    _fatigue_preset_map = {"최근 7일": "last_7d", "최근 14일": "last_14d", "최근 30일": "last_30d"}
+    _fatigue_period_label = st.session_state.get("creative_preset", "최근 7일")
+    _fatigued_ads = load_meta_creative_fatigue(_fatigue_preset_map.get(_fatigue_period_label, "last_14d"))
     if _fatigued_ads:
         _critical_ads = [a for a in _fatigued_ads if a["level"] == "critical"]
         _warning_ads  = [a for a in _fatigued_ads if a["level"] == "warning"]
@@ -1655,7 +1659,7 @@ with tab1:
                 <div style='display:flex;justify-content:space-between;align-items:flex-start;'>
                     <div>
                         <span style='font-size:15px;font-weight:700;color:#C0392B;'>🚨 소재 교체 필요</span>
-                        <span style='font-size:12px;color:#888;margin-left:10px;'>아래 소재의 CTR이 급락했어요. 즉시 교체를 권장합니다.</span>
+                        <span style='font-size:12px;color:#888;margin-left:10px;'>아래 소재의 CTR이 급락했어요 ({_fatigue_period_label} 기준). 즉시 교체를 권장합니다.</span>
                     </div>
                     <a href='https://business.facebook.com/adsmanager' target='_blank'
                        style='background:#E74C3C;color:white;padding:7px 14px;border-radius:5px;
@@ -1682,7 +1686,7 @@ with tab1:
                 <div style='display:flex;justify-content:space-between;align-items:flex-start;'>
                     <div>
                         <span style='font-size:15px;font-weight:700;color:#D35400;'>⚠️ 소재 피로도 감지</span>
-                        <span style='font-size:12px;color:#888;margin-left:10px;'>3~5일 내 소재 교체를 준비하세요.</span>
+                        <span style='font-size:12px;color:#888;margin-left:10px;'>{_fatigue_period_label} 기준 · 3~5일 내 소재 교체를 준비하세요.</span>
                     </div>
                     <a href='https://business.facebook.com/adsmanager' target='_blank'
                        style='background:#F39C12;color:white;padding:7px 14px;border-radius:5px;
