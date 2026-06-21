@@ -1557,22 +1557,31 @@ with tab1:
             _ht += "<br><br><i style='color:#999'>Meta 소재 데이터 없음 (자연유입)</i>"
         _hover_texts.append(_ht)
 
-    fig1.add_trace(go.Scatter(
-        x=conv_df["날짜"], y=conv_df["방문자"],
-        name="전환 발생",
-        mode="markers",
-        marker=dict(symbol="circle", size=12, color=COLOR["green"],
-                    line=dict(color="white", width=2)),
-        text=_hover_texts,
+    # 전환수 막대 (보조축) — 전체 날짜 기준, 0건인 날도 포함해서 표시
+    _hover_map = dict(zip(conv_df["날짜"], _hover_texts))
+    _conv_vals_full = df.apply(
+        lambda r: int(r["전환_메타"]) if r["전환_메타"] > 0 else int(r["구매"]), axis=1
+    )
+    _hover_texts_full = [
+        _hover_map.get(label, f"<b>📅 {label}</b><br>전환 없음")
+        for label in df["날짜"]
+    ]
+    fig1.add_trace(go.Bar(
+        x=df["날짜"], y=_conv_vals_full,
+        name="전환수",
+        marker_color=COLOR["green"],
+        opacity=0.85,
+        width=0.4,
+        text=_hover_texts_full,
         hovertemplate="%{text}<extra></extra>",
-    ), secondary_y=False)
+    ), secondary_y=True)
 
-    # annotation 라벨 (점 위 텍스트)
+    # annotation 라벨 (막대 위 텍스트, 보조축 기준)
     if not conv_df.empty:
         for _, _row in conv_df.iterrows():
             _date_key  = str(_row["날짜_key"])  # YYYY-MM-DD — Meta 조회용
             _date_label = str(_row["날짜"])      # M/D — 차트 x축 좌표용
-            _vis = _row["방문자"]
+            _conv_n_for_y = int(_row["전환_메타"]) if _row["전환_메타"] > 0 else int(_row["구매"])
             if _date_key in _cr_by_date:
                 _top = _cr_by_date[_date_key].iloc[0]
                 _n_others = len(_cr_by_date[_date_key]) - 1
@@ -1581,14 +1590,13 @@ with tab1:
                     _label += f" 외 {_n_others}개"
                 _label += f" ({int(_top['전환수'])}건)"
             else:
-                _conv_n = int(_row["전환_메타"]) if _row["전환_메타"] > 0 else int(_row["구매"])
-                _label = f"전환 {_conv_n}건"
+                _label = f"전환 {_conv_n_for_y}건"
             fig1.add_annotation(
-                x=_date_label, y=_vis,  # 차트 x축과 동일한 M/D 형식
+                x=_date_label, y=_conv_n_for_y, yref="y2",  # 보조축(전환수) 기준
                 text=_label,
                 showarrow=True,
                 arrowhead=0, arrowwidth=1, arrowcolor="#27AE60",
-                ax=0, ay=-36,
+                ax=0, ay=-30,
                 font=dict(size=10, color="#1A6B35"),
                 bgcolor="rgba(39,174,96,0.08)",
                 bordercolor="#27AE60",
@@ -1596,15 +1604,31 @@ with tab1:
                 align="center",
             )
 
+    # 방문자수 y축 범위를 좁혀서 변동이 잘 보이도록 줌인
+    _vis_min = float(df["방문자"].min())
+    _vis_max = float(df["방문자"].max())
+    _vis_pad = max((_vis_max - _vis_min) * 0.15, 1)
+    _vis_range = [max(0, _vis_min - _vis_pad), _vis_max + _vis_pad]
+
+    # 전환수 보조축 범위 — 작은 정수 단위로 깔끔하게
+    _conv_max = int(_conv_vals_full.max()) if len(_conv_vals_full) else 0
+    _conv_range = [0, max(_conv_max * 1.5, 2)]
+
     fig1.update_layout(
         height=360, margin=dict(l=0, r=0, t=10, b=0),
         plot_bgcolor="white", paper_bgcolor="white",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         xaxis=dict(type="category", showgrid=False, tickfont=dict(size=11)),
-        yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="방문자수"),
+        yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11),
+                   title="방문자수", range=_vis_range),
         hovermode="x unified", barmode="overlay",
     )
-    fig1.update_layout(yaxis2=dict(overlaying="y", visible=False))
+    fig1.update_layout(yaxis2=dict(
+        overlaying="y", side="right", visible=True, showgrid=False,
+        title="전환수", range=_conv_range,
+        dtick=1 if _conv_max <= 6 else None,
+        tickfont=dict(size=11),
+    ))
     st.plotly_chart(fig1, use_container_width=True)
 
     # ── 방문자·전환 추이 인사이트 ─────────────────────────────────
