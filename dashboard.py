@@ -1403,7 +1403,10 @@ with col_refresh:
 st.markdown("---")
 
 # ── 탭 분기 ──────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs(["📊 방문자 · 광고 성과", "🏬 플랫폼별 매출", "📅 기간별 매출 조회", "📱 인스타그램 콘텐츠"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 방문자 · 광고 성과", "🏬 플랫폼별 매출", "📅 기간별 매출 조회",
+    "📱 인스타그램 콘텐츠", "📖 플레이북",
+])
 
 
 # ════════════════════════════════════════════════════════════════
@@ -2966,6 +2969,118 @@ with tab4:
             </tr></thead>
             <tbody>{_rows_html2}</tbody>
         </table></div>""", unsafe_allow_html=True)
+
+
+# ════════════════════════════════════════════════════════════════
+# TAB 5: 플레이북 — 검증된 성공 사례 & 전략 가이드
+# ════════════════════════════════════════════════════════════════
+with tab5:
+    st.markdown("---")
+    st.markdown("### 📖 노미니컬 플레이북")
+    st.caption("데이터로 검증된 패턴을 선례로 남겨 다음 전략에 그대로 활용하기 위한 기록입니다.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 핵심 프레임워크 ──────────────────────────────────────────
+    chart_container("핵심 프레임워크", "콘텐츠 → 커머스 → 광고, 순서가 곧 전략이다")
+    st.markdown("""
+<div style='background:#F7F9FC;border-radius:10px;padding:20px 24px;margin-bottom:8px;'>
+<b>올바른 실행 순서</b><br><br>
+① <b>커머스 세팅 (선행)</b> — 프로모션 확정 · 상세페이지 강화 · 재고·배송 세팅<br>
+② <b>콘텐츠 발행</b> — 커머스와 연결된 서사로 제작 (링크는 이미 살 수 있는 상태)<br>
+③ <b>퍼포먼스 부스팅 (즉시)</b> — 반응 좋은 콘텐츠를 바로 광고 소재로 전환 + 리타겟팅 동시 집행<br><br>
+<i style='color:#888;'>예산을 늘리기 전에 소재 효율을 먼저 확인한다 — 검증된 오가닉 소재가 예산 확대보다 먼저다.</i>
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 성공 사례 1 ──────────────────────────────────────────────
+    chart_container("✅ 사례 1 — 러닝쇼츠 프리오더 (2026-05-24)", "상시+리타겟팅 동시 집행")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: kpi_card("유입", "117명")
+    with c2: kpi_card("CPC", "257원", "평균 대비 저렴", True)
+    with c3: kpi_card("전환", "4건")
+    with c4: kpi_card("ROAS", "6.15배", "목표 3배 이상", True)
+    st.markdown("""
+<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:10px;'>
+프리오더 마감일을 명시한 콘텐츠를 상시 캠페인 + 리타겟팅 캠페인에 동시 집행 — 신규 유입과 장바구니 재공략이 같은 날 맞물리며 CPC가 평균보다 크게 낮아짐.
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 성공 사례 2 ──────────────────────────────────────────────
+    chart_container("✅ 사례 2 — 페이크 레이어드티 릴스 (2026-06-21~23)", "재고·상세페이지 보강 → 광고 전환 → ROAS 3.9배 개선")
+    st.markdown("""
+<div style='background:#FFF9E8;border-left:4px solid #F39C12;border-radius:6px;padding:14px 18px;margin-bottom:14px;'>
+<b>비하인드 스토리</b><br>
+6/17 오가닉 릴스는 저장·도달 반응이 좋았으나 <b>전환 0건</b> — 진단 결과 SOLD OUT 상태 + 상세페이지에 착용샷 부재가 원인.
+재입고 및 상세페이지 보강 후 같은 콘텐츠를 광고 소재로 전환 → 6/21부터 자사몰·무신사·W컨셉에서 동시에 판매 회복.
+</div>
+""", unsafe_allow_html=True)
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        st.markdown("**평소 (6/15~6/20, 6일)**")
+        kc1, kc2, kc3 = st.columns(3)
+        with kc1: kpi_card("일평균 광고비", "32,376원")
+        with kc2: kpi_card("일평균 귀속매출", "46,192원")
+        with kc3: kpi_card("블렌디드 ROAS", "1.43배")
+    with cc2:
+        st.markdown("**호조 (6/21~6/23, 3일)**")
+        kc4, kc5, kc6 = st.columns(3)
+        with kc4: kpi_card("일평균 광고비", "52,500원", "+62%")
+        with kc5: kpi_card("일평균 귀속매출", "289,976원", "+528%", True)
+        with kc6: kpi_card("블렌디드 ROAS", "5.52배", "3.9배 개선", True)
+    st.markdown("""
+<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:14px;'>
+<b>핵심 교훈:</b> 광고비는 62%만 늘었는데 귀속매출은 528% 증가 — 매출 증가의 원인은 예산이 아니라 <b>소재 교체</b>였다.
+같은 1원이 평소엔 1.43원, 호조 기간엔 5.52원을 벌어들임. <b>예산 확대보다 소재 검증이 먼저</b>라는 근거.
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 소재 운영 기준 ────────────────────────────────────────────
+    chart_container("📏 소재 운영 기준 (벤치마크)", "노미니컬 실제 데이터 기반")
+    st.markdown("""
+<table style='width:100%;border-collapse:collapse;'>
+<thead><tr>
+<th style='text-align:left;padding:8px 10px;background:#F7F7F7;font-size:12px;border-bottom:2px solid #E8E8E8;'>지표</th>
+<th style='text-align:left;padding:8px 10px;background:#F7F7F7;font-size:12px;border-bottom:2px solid #E8E8E8;'>정상</th>
+<th style='text-align:left;padding:8px 10px;background:#F7F7F7;font-size:12px;border-bottom:2px solid #E8E8E8;'>주의</th>
+<th style='text-align:left;padding:8px 10px;background:#F7F7F7;font-size:12px;border-bottom:2px solid #E8E8E8;'>교체 필요</th>
+</tr></thead>
+<tbody>
+<tr><td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;'>CTR</td>
+<td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;color:#27AE60;'>5~7%</td>
+<td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;color:#F39C12;'>피크 대비 30%↓</td>
+<td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;color:#E74C3C;'>3% 미만 또는 피크 대비 50%↓</td></tr>
+<tr><td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;'>소재 수명</td>
+<td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;' colspan='3'>집행 후 3~6일이 전환 집중 구간 — 7일 차부터 피로도 시작, 늦어도 10일 내 교체</td></tr>
+<tr><td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;'>캠페인 예산 배분</td>
+<td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;' colspan='3'>상시 70% (신규 유입·픽셀 누적) : 리타겟팅 30% (장바구니·방문자 재공략)</td></tr>
+</tbody>
+</table>
+""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 이탈 방지 체크리스트 ──────────────────────────────────────
+    chart_container("🛡️ 콘텐츠 발행 전 체크리스트", "이탈을 막는 4가지 장치")
+    st.markdown("""
+<div style='background:#F7F9FC;border-radius:10px;padding:18px 22px;'>
+☐ <b>지금 사야 할 이유가 있는가</b> — 프리오더 마감일 · 한정수량 · 기한 있는 프로모션<br>
+☐ <b>재고가 충분한가</b> — SOLD OUT 상태로 콘텐츠를 발행하면 유입이 전부 이탈됨<br>
+☐ <b>상세페이지에 착용샷이 있는가</b> — 콘텐츠 톤과 이어지는 서사형 구성, 첫 이미지는 반드시 착용샷<br>
+☐ <b>퍼널이 짧은가</b> — 콘텐츠 → 구매까지 클릭 수 최소화<br>
+☐ <b>리타겟팅이 세팅되어 있는가</b> — 장바구니 이탈자 48시간 내 재접촉<br>
+☐ <b>날씨·요일을 고려했는가</b> — 일요일 저녁 발행 → 월~화 구매 전환 패턴 확인됨
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.caption("이 플레이북은 대시보드에서 발견된 실제 성공/실패 사례가 누적될 때마다 업데이트됩니다.")
 
 
 # ── 푸터 ───────────────────────────────────────────────────────────
