@@ -1608,11 +1608,13 @@ with tab1:
                 align="center",
             )
 
-    # 방문자수 y축 범위를 좁혀서 변동이 잘 보이도록 줌인
+    # 방문자수 y축 범위 — 단순 min/max는 바이럴 스파이크 같은 극단값 하나에
+    # 전체 스케일이 눌려버림(5/20 같은 평균 10배 급등일). 90th 퍼센타일 기준으로
+    # 대다수 날짜의 변동을 잘 보이게 하고, 스파이크는 차트 위로 잘려 보이게 함
     _vis_min = float(df["방문자"].min())
-    _vis_max = float(df["방문자"].max())
-    _vis_pad = max((_vis_max - _vis_min) * 0.15, 1)
-    _vis_range = [max(0, _vis_min - _vis_pad), _vis_max + _vis_pad]
+    _vis_p90 = float(df["방문자"].quantile(0.90))
+    _vis_pad = max((_vis_p90 - _vis_min) * 0.2, 1)
+    _vis_range = [max(0, _vis_min - _vis_pad), _vis_p90 + _vis_pad]
 
     # 전환수 보조축 범위 — 작은 정수 단위로 깔끔하게
     _conv_max = int(_conv_vals_full.max()) if len(_conv_vals_full) else 0
