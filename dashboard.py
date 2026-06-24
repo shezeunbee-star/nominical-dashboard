@@ -2228,9 +2228,12 @@ with tab2:
 
     pf = pf.reset_index(drop=True)
 
-    # 주문상태 필터 (취소 포함)
-    pf_valid   = pf                                    # 전체 (취소 포함)
-    pf_normal  = pf[~pf["주문상태"].str.contains("취소", na=False)]  # 취소 제외
+    # 주문상태 필터 (취소·반품 포함)
+    pf_valid   = pf                                    # 전체 (취소·반품 포함)
+    pf_normal  = pf[
+        ~pf["주문상태"].str.contains("취소", na=False) &
+        ~pf["주문상태"].str.contains("반품", na=False)
+    ]  # 취소·반품 제외
 
     st.markdown("---")
 
@@ -2240,16 +2243,21 @@ with tab2:
     total_orders  = len(pf_normal)
     avg_price_pf  = int(total_sales / total_orders) if total_orders > 0 else 0
     profit_rate   = round(total_profit / total_sales * 100, 1) if total_sales > 0 else 0
-    cancel_cnt    = len(pf[pf["주문상태"].str.contains("취소", na=False)])
+    # 취소와 반품을 분리해서 집계 ("반품"이 포함되면 취소가 아닌 반품으로 분류)
+    cancel_cnt    = len(pf[pf["주문상태"].str.contains("취소", na=False) & ~pf["주문상태"].str.contains("반품", na=False)])
+    return_cnt    = len(pf[pf["주문상태"].str.contains("반품", na=False)])
+    _total_with_cr = total_orders + cancel_cnt + return_cnt
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
     with c1: kpi_card("총 매출액", fmt_num(total_sales, "원"))
     with c2: kpi_card("총 실수익", fmt_num(total_profit, "원"), f"수익률 {profit_rate}%", profit_rate >= 65)
-    with c3: kpi_card("총 주문 건수", f"{total_orders:,}건", f"취소 {cancel_cnt}건")
+    with c3: kpi_card("총 주문 건수", f"{total_orders:,}건", f"취소 {cancel_cnt}건 · 반품 {return_cnt}건")
     with c4: kpi_card("평균 객단가", f"{avg_price_pf:,}원")
-    with c5: kpi_card("취소율", f"{round(cancel_cnt/(total_orders+cancel_cnt)*100) if (total_orders+cancel_cnt)>0 else 0}%",
+    with c5: kpi_card("취소율", f"{round(cancel_cnt/_total_with_cr*100) if _total_with_cr>0 else 0}%",
                       f"취소 {cancel_cnt}건")
-    with c6: kpi_card("수익률", f"{profit_rate}%",
+    with c6: kpi_card("반품율", f"{round(return_cnt/_total_with_cr*100) if _total_with_cr>0 else 0}%",
+                      f"반품 {return_cnt}건")
+    with c7: kpi_card("수익률", f"{profit_rate}%",
                       "목표 70% 이상" if profit_rate < 70 else "✓ 목표 달성",
                       profit_rate >= 70)
 
@@ -2616,12 +2624,16 @@ with tab3:
                 (df_platform_all["주문일_dt"].dt.date <= t3_end)
             )
             t3_df     = df_platform_all[t3_mask].copy()
-            t3_normal = t3_df[~t3_df["주문상태"].str.contains("취소", na=False)]
-            t3_cancel = t3_df[t3_df["주문상태"].str.contains("취소", na=False)]
+            t3_cancel = t3_df[t3_df["주문상태"].str.contains("취소", na=False) & ~t3_df["주문상태"].str.contains("반품", na=False)]
+            t3_return = t3_df[t3_df["주문상태"].str.contains("반품", na=False)]
+            t3_normal = t3_df[
+                ~t3_df["주문상태"].str.contains("취소", na=False) &
+                ~t3_df["주문상태"].str.contains("반품", na=False)
+            ]
 
             st.markdown(
                 f'<div style="color:#8C8C8C;font-size:13px;margin:4px 0 12px;">'
-                f'정상 {len(t3_normal)}건 · 취소 {len(t3_cancel)}건</div>',
+                f'정상 {len(t3_normal)}건 · 취소 {len(t3_cancel)}건 · 반품 {len(t3_return)}건</div>',
                 unsafe_allow_html=True
             )
             st.markdown("---")
