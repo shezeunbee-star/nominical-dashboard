@@ -2981,28 +2981,63 @@ with tab5:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── 타임라인 요약 (원형 마일스톤) ──────────────────────────────
-    _milestones = [
-        {"date": "5/24", "label": "러닝쇼츠\n프리오더", "sub": "ROAS 6.15배", "color": "#4F8EF7"},
-        {"date": "6/17", "label": "레이어드티\n전환 0건", "sub": "SOLD OUT 진단", "color": "#E74C3C"},
-        {"date": "6/21", "label": "레이어드티\n전환 피크!", "sub": "ROAS 5.52배", "color": "#27AE60"},
+    # ── 1depth 표지: 애플워치 스타일 허니콤 카테고리 ─────────────────
+    # 카테고리별 원형 버블이 겹쳐 보이는 표지 → 클릭하면 2depth(사례 상세)로 진입
+    _categories = [
+        {"key": "컨텐츠",       "color": "#4F8EF7", "size": 92,  "top": 0,   "left": 8},
+        {"key": "퍼포먼스 마케팅", "color": "#27AE60", "size": 110, "top": 10,  "left": 130},
+        {"key": "상품기획",      "color": "#F7874F", "size": 84,  "top": 95,  "left": 215},
+        {"key": "이커머스",      "color": "#9B59B6", "size": 96,  "top": 100, "left": 70},
     ]
-    _circle_html = "<div style='display:flex;justify-content:center;gap:48px;padding:24px 10px;flex-wrap:wrap;'>"
-    for i, m in enumerate(_milestones):
-        _circle_html += f"""
-        <div style='text-align:center;width:120px;'>
-            <div style='width:88px;height:88px;border-radius:50%;background:{m["color"]}1A;
-                        border:3px solid {m["color"]};display:flex;align-items:center;justify-content:center;
-                        margin:0 auto 10px;'>
-                <span style='font-size:13px;font-weight:700;color:{m["color"]};white-space:pre-line;line-height:1.3;'>{m["label"]}</span>
-            </div>
-            <div style='font-size:14px;font-weight:700;color:#1A1A1A;'>{m["date"]}</div>
-            <div style='font-size:11px;color:#888;margin-top:2px;'>{m["sub"]}</div>
-        </div>"""
-        if i < len(_milestones) - 1:
-            _circle_html += "<div style='align-self:center;font-size:20px;color:#CCC;margin-top:-20px;'>→</div>"
-    _circle_html += "</div>"
-    st.markdown(_circle_html, unsafe_allow_html=True)
+    _latest_case = {"date": "6/21", "text": "페이크레이어드 티\n릴스로 전환 피크"}
+
+    _honeycomb_html = "<div style='position:relative;height:230px;max-width:330px;margin:0 auto 12px;'>"
+    for cat in _categories:
+        is_featured = cat["key"] == "퍼포먼스 마케팅"
+        _inner = (
+            f"<div style='font-size:12px;font-weight:700;color:{cat['color']};white-space:pre-line;line-height:1.3;text-align:center;padding:6px;'>"
+            f"<b style='font-size:13px;'>{_latest_case['date']}</b><br>{_latest_case['text']}</div>"
+            if is_featured else ""
+        )
+        _honeycomb_html += f"""
+        <div style='position:absolute;top:{cat["top"]}px;left:{cat["left"]}px;
+                    width:{cat["size"]}px;height:{cat["size"]}px;border-radius:50%;
+                    background:{cat["color"]}{"33" if is_featured else "1A"};
+                    border:3px solid {cat["color"]};display:flex;align-items:center;justify-content:center;
+                    box-shadow:0 2px 8px rgba(0,0,0,0.06);'>
+            {_inner}
+        </div>
+        <div style='position:absolute;top:{cat["top"]+cat["size"]+4}px;left:{cat["left"]}px;width:{cat["size"]}px;
+                    text-align:center;font-size:11px;color:#888;'>{"" if is_featured else cat["key"]}</div>
+        """
+    _honeycomb_html += "</div>"
+    st.markdown(_honeycomb_html, unsafe_allow_html=True)
+
+    st.caption("아래 영역을 눌러 카테고리별 사례를 펼쳐보세요")
+
+    # 실제 클릭 동작은 네이티브 버튼으로 — 허니콤 바로 아래 배치
+    if "playbook_filter" not in st.session_state:
+        st.session_state["playbook_filter"] = "전체"
+
+    _bcol = st.columns(5)
+    _filter_options = ["전체", "컨텐츠", "퍼포먼스 마케팅", "상품기획", "이커머스"]
+    for i, opt in enumerate(_filter_options):
+        with _bcol[i]:
+            _is_active = st.session_state["playbook_filter"] == opt
+            if st.button(opt, key=f"pb_filter_{opt}", use_container_width=True,
+                         type="primary" if _is_active else "secondary"):
+                st.session_state["playbook_filter"] = opt
+                st.rerun()
+
+    _pf = st.session_state["playbook_filter"]
+
+    # 사례별 카테고리 태그 (필터링용)
+    _case_tags = {
+        "사례1": {"퍼포먼스 마케팅", "이커머스"},
+        "사례2": {"컨텐츠", "퍼포먼스 마케팅", "이커머스"},
+    }
+    def _pb_show(case_key):
+        return _pf == "전체" or _pf in _case_tags.get(case_key, set())
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -3019,7 +3054,8 @@ with tab5:
 """, unsafe_allow_html=True)
 
     # ── 사례 1 ──────────────────────────────────────────────────
-    with st.expander("✅ 사례 1 — 러닝쇼츠 프리오더 (2026-05-24)", expanded=False):
+    if _pb_show("사례1"):
+      with st.expander("✅ 사례 1 — 러닝쇼츠 프리오더 (2026-05-24)", expanded=False):
         chart_container("상시+리타겟팅 동시 집행", "")
         c1, c2, c3, c4 = st.columns(4)
         with c1: kpi_card("유입", "117명")
@@ -3033,7 +3069,8 @@ with tab5:
 """, unsafe_allow_html=True)
 
     # ── 사례 2 ──────────────────────────────────────────────────
-    with st.expander("✅ 사례 2 — 페이크 레이어드티 릴스 (2026-06-21~23)", expanded=False):
+    if _pb_show("사례2"):
+      with st.expander("✅ 사례 2 — 페이크 레이어드티 릴스 (2026-06-21~23)", expanded=False):
         chart_container("재고·상세페이지 보강 → 광고 전환 → ROAS 3.9배 개선", "")
         st.markdown("""
 <div style='background:#FFF9E8;border-left:4px solid #F39C12;border-radius:6px;padding:14px 18px;margin-bottom:14px;'>
