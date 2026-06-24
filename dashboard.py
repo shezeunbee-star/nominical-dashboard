@@ -2981,9 +2981,34 @@ with tab5:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── 핵심 프레임워크 ──────────────────────────────────────────
-    chart_container("핵심 프레임워크", "콘텐츠 → 커머스 → 광고, 순서가 곧 전략이다")
-    st.markdown("""
+    # ── 타임라인 요약 (원형 마일스톤) ──────────────────────────────
+    _milestones = [
+        {"date": "5/24", "label": "러닝쇼츠\n프리오더", "sub": "ROAS 6.15배", "color": "#4F8EF7"},
+        {"date": "6/17", "label": "레이어드티\n전환 0건", "sub": "SOLD OUT 진단", "color": "#E74C3C"},
+        {"date": "6/21", "label": "레이어드티\n전환 피크!", "sub": "ROAS 5.52배", "color": "#27AE60"},
+    ]
+    _circle_html = "<div style='display:flex;justify-content:center;gap:48px;padding:24px 10px;flex-wrap:wrap;'>"
+    for i, m in enumerate(_milestones):
+        _circle_html += f"""
+        <div style='text-align:center;width:120px;'>
+            <div style='width:88px;height:88px;border-radius:50%;background:{m["color"]}1A;
+                        border:3px solid {m["color"]};display:flex;align-items:center;justify-content:center;
+                        margin:0 auto 10px;'>
+                <span style='font-size:13px;font-weight:700;color:{m["color"]};white-space:pre-line;line-height:1.3;'>{m["label"]}</span>
+            </div>
+            <div style='font-size:14px;font-weight:700;color:#1A1A1A;'>{m["date"]}</div>
+            <div style='font-size:11px;color:#888;margin-top:2px;'>{m["sub"]}</div>
+        </div>"""
+        if i < len(_milestones) - 1:
+            _circle_html += "<div style='align-self:center;font-size:20px;color:#CCC;margin-top:-20px;'>→</div>"
+    _circle_html += "</div>"
+    st.markdown(_circle_html, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 핵심 프레임워크 (요약은 항상 노출, 상세는 펼쳐보기) ─────────
+    with st.expander("📐 핵심 프레임워크 — 콘텐츠 → 커머스 → 광고", expanded=False):
+        st.markdown("""
 <div style='background:#F7F9FC;border-radius:10px;padding:20px 24px;margin-bottom:8px;'>
 <b>올바른 실행 순서</b><br><br>
 ① <b>커머스 세팅 (선행)</b> — 프로모션 확정 · 상세페이지 강화 · 재고·배송 세팅<br>
@@ -2993,57 +3018,53 @@ with tab5:
 </div>
 """, unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── 성공 사례 1 ──────────────────────────────────────────────
-    chart_container("✅ 사례 1 — 러닝쇼츠 프리오더 (2026-05-24)", "상시+리타겟팅 동시 집행")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: kpi_card("유입", "117명")
-    with c2: kpi_card("CPC", "257원", "평균 대비 저렴", True)
-    with c3: kpi_card("전환", "4건")
-    with c4: kpi_card("ROAS", "6.15배", "목표 3배 이상", True)
-    st.markdown("""
+    # ── 사례 1 ──────────────────────────────────────────────────
+    with st.expander("✅ 사례 1 — 러닝쇼츠 프리오더 (2026-05-24)", expanded=False):
+        chart_container("상시+리타겟팅 동시 집행", "")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: kpi_card("유입", "117명")
+        with c2: kpi_card("CPC", "257원", "평균 대비 저렴", True)
+        with c3: kpi_card("전환", "4건")
+        with c4: kpi_card("ROAS", "6.15배", "목표 3배 이상", True)
+        st.markdown("""
 <div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:10px;'>
 프리오더 마감일을 명시한 콘텐츠를 상시 캠페인 + 리타겟팅 캠페인에 동시 집행 — 신규 유입과 장바구니 재공략이 같은 날 맞물리며 CPC가 평균보다 크게 낮아짐.
 </div>
 """, unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── 성공 사례 2 ──────────────────────────────────────────────
-    chart_container("✅ 사례 2 — 페이크 레이어드티 릴스 (2026-06-21~23)", "재고·상세페이지 보강 → 광고 전환 → ROAS 3.9배 개선")
-    st.markdown("""
+    # ── 사례 2 ──────────────────────────────────────────────────
+    with st.expander("✅ 사례 2 — 페이크 레이어드티 릴스 (2026-06-21~23)", expanded=False):
+        chart_container("재고·상세페이지 보강 → 광고 전환 → ROAS 3.9배 개선", "")
+        st.markdown("""
 <div style='background:#FFF9E8;border-left:4px solid #F39C12;border-radius:6px;padding:14px 18px;margin-bottom:14px;'>
 <b>비하인드 스토리</b><br>
 6/17 오가닉 릴스는 저장·도달 반응이 좋았으나 <b>전환 0건</b> — 진단 결과 SOLD OUT 상태 + 상세페이지에 착용샷 부재가 원인.
 재입고 및 상세페이지 보강 후 같은 콘텐츠를 광고 소재로 전환 → 6/21부터 자사몰·무신사·W컨셉에서 동시에 판매 회복.
 </div>
 """, unsafe_allow_html=True)
-    cc1, cc2 = st.columns(2)
-    with cc1:
-        st.markdown("**평소 (6/15~6/20, 6일)**")
-        kc1, kc2, kc3 = st.columns(3)
-        with kc1: kpi_card("일평균 광고비", "32,376원")
-        with kc2: kpi_card("일평균 귀속매출", "46,192원")
-        with kc3: kpi_card("블렌디드 ROAS", "1.43배")
-    with cc2:
-        st.markdown("**호조 (6/21~6/23, 3일)**")
-        kc4, kc5, kc6 = st.columns(3)
-        with kc4: kpi_card("일평균 광고비", "52,500원", "+62%")
-        with kc5: kpi_card("일평균 귀속매출", "289,976원", "+528%", True)
-        with kc6: kpi_card("블렌디드 ROAS", "5.52배", "3.9배 개선", True)
-    st.markdown("""
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            st.markdown("**평소 (6/15~6/20, 6일)**")
+            kc1, kc2, kc3 = st.columns(3)
+            with kc1: kpi_card("일평균 광고비", "32,376원")
+            with kc2: kpi_card("일평균 귀속매출", "46,192원")
+            with kc3: kpi_card("블렌디드 ROAS", "1.43배")
+        with cc2:
+            st.markdown("**호조 (6/21~6/23, 3일)**")
+            kc4, kc5, kc6 = st.columns(3)
+            with kc4: kpi_card("일평균 광고비", "52,500원", "+62%")
+            with kc5: kpi_card("일평균 귀속매출", "289,976원", "+528%", True)
+            with kc6: kpi_card("블렌디드 ROAS", "5.52배", "3.9배 개선", True)
+        st.markdown("""
 <div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:14px;'>
 <b>핵심 교훈:</b> 광고비는 62%만 늘었는데 귀속매출은 528% 증가 — 매출 증가의 원인은 예산이 아니라 <b>소재 교체</b>였다.
 같은 1원이 평소엔 1.43원, 호조 기간엔 5.52원을 벌어들임. <b>예산 확대보다 소재 검증이 먼저</b>라는 근거.
 </div>
 """, unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
     # ── 소재 운영 기준 ────────────────────────────────────────────
-    chart_container("📏 소재 운영 기준 (벤치마크)", "노미니컬 실제 데이터 기반")
-    st.markdown("""
+    with st.expander("📏 소재 운영 기준 (벤치마크)", expanded=False):
+        st.markdown("""
 <table style='width:100%;border-collapse:collapse;'>
 <thead><tr>
 <th style='text-align:left;padding:8px 10px;background:#F7F7F7;font-size:12px;border-bottom:2px solid #E8E8E8;'>지표</th>
@@ -3064,11 +3085,9 @@ with tab5:
 </table>
 """, unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
     # ── 이탈 방지 체크리스트 ──────────────────────────────────────
-    chart_container("🛡️ 콘텐츠 발행 전 체크리스트", "이탈을 막는 4가지 장치")
-    st.markdown("""
+    with st.expander("🛡️ 콘텐츠 발행 전 체크리스트", expanded=False):
+        st.markdown("""
 <div style='background:#F7F9FC;border-radius:10px;padding:18px 22px;'>
 ☐ <b>지금 사야 할 이유가 있는가</b> — 프리오더 마감일 · 한정수량 · 기한 있는 프로모션<br>
 ☐ <b>재고가 충분한가</b> — SOLD OUT 상태로 콘텐츠를 발행하면 유입이 전부 이탈됨<br>
