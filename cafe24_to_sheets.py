@@ -20,12 +20,12 @@ API_VERSION    = "2026-03-01"
 
 # Cafe24 연동 마켓 market_id 매핑
 MARKET_PLATFORM_MAP = {
-    "musinsa":  "무신사",   # 무신사
-    "zigzag":   "지그재그", # 지그재그 (카카오스타일)
+    "musinsa":  "무신사",     # 무신사
+    "zigzag":   "지그재그",   # 지그재그 (카카오스타일)
+    "shopn":    "스마트스토어", # 옛 네이버 "샵N" 코드명이 그대로 남아있음
+                              # (order_place_name="스마트스토어"로 실제 확인됨)
 }
-# 위 목록 외: self, NCHECKOUT, mobile, shopn 등 → 자사몰(Cafe24)
-# 스마트스토어는 정확한 market_id 코드 미확인 — 첫 주문 발생 시 실제 코드로
-# MARKET_PLATFORM_MAP에 추가 필요. 그 전까지는 패턴 매칭으로 임시 대응.
+# 위 목록 외: self, NCHECKOUT, mobile 등 → 자사몰(Cafe24)
 
 def market_to_platform(market_id):
     mid = (market_id or "").lower().strip()

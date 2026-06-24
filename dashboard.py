@@ -1276,7 +1276,9 @@ def update_cafe24_yesterday():
                 pass
 
         # ── 주문 조회 ────────────────────────────────────────────
-        MARKET_MAP = {"musinsa": "무신사", "zigzag": "지그재그"}
+        # shopn = 스마트스토어 (옛 네이버 "샵N" 서비스 시절 코드명이 그대로 남아있음.
+        # order_place_name 필드로 실제 확인됨: order_place_id="shopn" → "스마트스토어")
+        MARKET_MAP = {"musinsa": "무신사", "zigzag": "지그재그", "shopn": "스마트스토어"}
         COMM_CAFE24 = 3
         COMM_DEFAULT = 30
 
@@ -1284,7 +1286,6 @@ def update_cafe24_yesterday():
             mid = (market_id or "").lower().strip()
             if mid in MARKET_MAP:
                 return MARKET_MAP[mid]
-            # 스마트스토어 market_id 정확한 코드 미확인 — 패턴 매칭으로 우선 대응
             if "naver" in mid or "smart" in mid:
                 return "스마트스토어"
             return "Cafe24"
@@ -1321,6 +1322,9 @@ def update_cafe24_yesterday():
         for order in orders:
             platform = _market_to_platform(order.get("market_id"))
             order_date = (order.get("order_date") or "")[:10]
+            # Cafe24 API의 canceled 필드로 취소/반품 상태 판별
+            # (order_place_name="스마트스토어" 주문 확인 시 canceled="T"인 건이 실제 존재함)
+            status = "취소" if str(order.get("canceled", "")).upper() == "T" else "정상"
             items = order.get("items", [])
             for item in items:
                 name    = str(item.get("product_name", "-"))
@@ -1336,7 +1340,6 @@ def update_cafe24_yesterday():
                 total = price * qty
                 comm  = COMM_CAFE24 if platform == "Cafe24" else COMM_DEFAULT
                 profit = round(total * (1 - comm / 100))
-                status = "정상"
                 key = f"{platform}|{order_date}|{code}|{color}|{size}"
                 if key not in existing_keys:
                     new_rows.append([platform, order_date, name, code,
