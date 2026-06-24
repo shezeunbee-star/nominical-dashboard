@@ -2978,76 +2978,64 @@ with tab5:
     st.markdown("---")
     st.markdown("### 📖 노미니컬 플레이북")
     st.caption("데이터로 검증된 패턴을 선례로 남겨 다음 전략에 그대로 활용하기 위한 기록입니다.")
-
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── 1depth 표지: 애플워치 홈 화면 스타일 허니콤 그리드 ─────────────
-    # 균일한 크기의 원형 아이콘이 살짝 겹치며 벌집 모양으로 배치되는 표지
-    # (애플워치는 구형 곡면처럼 보이도록 행마다 좌우로 번갈아 오프셋을 줌)
-    _D  = 84   # 기본 원 지름
-    _DF = 100  # 강조(featured) 원 지름 — 가장 최근 사례
-    _categories = [
-        # key, color, size, top, left
-        ("컨텐츠",         "#4F8EF7", _D,  0,  18),
-        ("퍼포먼스 마케팅", "#27AE60", _DF, 0,  108),
-        ("이커머스",       "#9B59B6", _D,  62, 60),
-        ("상품기획",       "#F7874F", _D,  62, 150),
-    ]
-    _latest_case = {"date": "6/21", "text": "페이크레이어드 티<br>릴스로 전환 피크"}
+    if "pb_view" not in st.session_state:
+        st.session_state["pb_view"] = "cover"
 
-    # 주의: st.markdown은 4칸 이상 들여쓰기된 줄을 코드블록으로 인식해 HTML이
-    # 그대로 텍스트로 노출됨 — 전체를 줄바꿈/들여쓰기 없는 한 줄 문자열로 생성
-    _parts = ["<div style='position:relative;height:160px;max-width:260px;margin:0 auto 4px;'>"]
-    for key, color, size, top, left in _categories:
-        is_featured = key == "퍼포먼스 마케팅"
-        if is_featured:
-            _inner = (f"<div style='font-size:11px;font-weight:700;color:{color};line-height:1.25;text-align:center;padding:4px;'>"
-                       f"<b style='font-size:12px;'>{_latest_case['date']}</b><br>{_latest_case['text']}</div>")
-        else:
-            _inner = f"<span style='font-size:11px;font-weight:600;color:{color};text-align:center;line-height:1.2;'>{key}</span>"
-        _bg = f"{color}{'2E' if is_featured else '1F'}"
-        _z  = 2 if is_featured else 1
-        _parts.append(
-            f"<div style='position:absolute;top:{top}px;left:{left}px;width:{size}px;height:{size}px;"
-            f"border-radius:50%;background:{_bg};border:3px solid {color};display:flex;"
-            f"align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.08);z-index:{_z};'>"
-            f"{_inner}</div>"
-        )
-    _parts.append("</div>")
-    _honeycomb_html = "".join(_parts)
-    st.markdown(_honeycomb_html, unsafe_allow_html=True)
-
-    st.caption("아래 영역을 눌러 카테고리별 사례를 펼쳐보세요")
-
-    # 실제 클릭 동작은 네이티브 버튼으로 — 허니콤 바로 아래 배치
-    if "playbook_filter" not in st.session_state:
-        st.session_state["playbook_filter"] = "전체"
-
-    _bcol = st.columns(5)
-    _filter_options = ["전체", "컨텐츠", "퍼포먼스 마케팅", "상품기획", "이커머스"]
-    for i, opt in enumerate(_filter_options):
-        with _bcol[i]:
-            _is_active = st.session_state["playbook_filter"] == opt
-            if st.button(opt, key=f"pb_filter_{opt}", use_container_width=True,
-                         type="primary" if _is_active else "secondary"):
-                st.session_state["playbook_filter"] = opt
-                st.rerun()
-
-    _pf = st.session_state["playbook_filter"]
-
-    # 사례별 카테고리 태그 (필터링용)
-    _case_tags = {
-        "사례1": {"퍼포먼스 마케팅", "이커머스"},
-        "사례2": {"컨텐츠", "퍼포먼스 마케팅", "이커머스"},
+    # 사례 데이터 (good/bad 구분 + 카테고리 태그)
+    _PB_CASES = {
+        "case1": {"type": "good", "date": "5/24",     "title": "러닝쇼츠 프리오더",
+                  "categories": ["퍼포먼스 마케팅", "이커머스"]},
+        "case2": {"type": "good", "date": "6/21~23",  "title": "페이크레이어드티 전환 피크",
+                  "categories": ["컨텐츠", "퍼포먼스 마케팅", "이커머스"]},
+        "case3": {"type": "bad",  "date": "6/17",     "title": "페이크레이어드티 전환 0건",
+                  "categories": ["상품기획", "이커머스"]},
     }
-    def _pb_show(case_key):
-        return _pf == "전체" or _pf in _case_tags.get(case_key, set())
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    # ════════════════════════════════════════════════════════════
+    # 1depth — 표지: Good Case / Bad Case 영역으로 나뉜 원형 카드
+    # ════════════════════════════════════════════════════════════
+    if st.session_state["pb_view"] == "cover":
 
-    # ── 핵심 프레임워크 (요약은 항상 노출, 상세는 펼쳐보기) ─────────
-    with st.expander("📐 핵심 프레임워크 — 콘텐츠 → 커머스 → 광고", expanded=False):
-        st.markdown("""
+        def _render_zone(zone_type, zone_label, color, bg):
+            st.markdown(
+                f"<div style='font-size:15px;font-weight:700;color:{color};margin-bottom:10px;'>{zone_label}</div>",
+                unsafe_allow_html=True
+            )
+            _keys = [k for k, v in _PB_CASES.items() if v["type"] == zone_type]
+            _cols = st.columns(len(_keys)) if _keys else []
+            for i, k in enumerate(_keys):
+                case = _PB_CASES[k]
+                with _cols[i]:
+                    _circle_html = (
+                        f"<div style='width:110px;height:110px;border-radius:50%;background:{bg};"
+                        f"border:3px solid {color};display:flex;align-items:center;justify-content:center;"
+                        f"margin:0 auto 8px;'>"
+                        f"<div style='font-size:11px;font-weight:700;color:{color};text-align:center;padding:6px;line-height:1.3;'>"
+                        f"<b style='font-size:12px;'>{case['date']}</b><br>{case['title']}</div></div>"
+                    )
+                    st.markdown(_circle_html, unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div style='text-align:center;font-size:11px;color:#999;margin-bottom:6px;'>{' · '.join(case['categories'])}</div>",
+                        unsafe_allow_html=True
+                    )
+                    if st.button("자세히 보기", key=f"pb_open_{k}", use_container_width=True):
+                        st.session_state["pb_view"] = k
+                        st.rerun()
+
+        col_good, col_bad = st.columns(2)
+        with col_good:
+            _render_zone("good", "✅ Good Case", "#27AE60", "#27AE601A")
+        with col_bad:
+            _render_zone("bad", "⚠️ Bad Case", "#E74C3C", "#E74C3C1A")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.caption("원을 누르면 해당 사례의 상세 인사이트로 이동합니다.")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("📐 핵심 프레임워크 — 콘텐츠 → 커머스 → 광고", expanded=False):
+            st.markdown("""
 <div style='background:#F7F9FC;border-radius:10px;padding:20px 24px;margin-bottom:8px;'>
 <b>올바른 실행 순서</b><br><br>
 ① <b>커머스 세팅 (선행)</b> — 프로모션 확정 · 상세페이지 강화 · 재고·배송 세팅<br>
@@ -3057,55 +3045,8 @@ with tab5:
 </div>
 """, unsafe_allow_html=True)
 
-    # ── 사례 1 ──────────────────────────────────────────────────
-    if _pb_show("사례1"):
-      with st.expander("✅ 사례 1 — 러닝쇼츠 프리오더 (2026-05-24)", expanded=False):
-        chart_container("상시+리타겟팅 동시 집행", "")
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: kpi_card("유입", "117명")
-        with c2: kpi_card("CPC", "257원", "평균 대비 저렴", True)
-        with c3: kpi_card("전환", "4건")
-        with c4: kpi_card("ROAS", "6.15배", "목표 3배 이상", True)
-        st.markdown("""
-<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:10px;'>
-프리오더 마감일을 명시한 콘텐츠를 상시 캠페인 + 리타겟팅 캠페인에 동시 집행 — 신규 유입과 장바구니 재공략이 같은 날 맞물리며 CPC가 평균보다 크게 낮아짐.
-</div>
-""", unsafe_allow_html=True)
-
-    # ── 사례 2 ──────────────────────────────────────────────────
-    if _pb_show("사례2"):
-      with st.expander("✅ 사례 2 — 페이크 레이어드티 릴스 (2026-06-21~23)", expanded=False):
-        chart_container("재고·상세페이지 보강 → 광고 전환 → ROAS 3.9배 개선", "")
-        st.markdown("""
-<div style='background:#FFF9E8;border-left:4px solid #F39C12;border-radius:6px;padding:14px 18px;margin-bottom:14px;'>
-<b>비하인드 스토리</b><br>
-6/17 오가닉 릴스는 저장·도달 반응이 좋았으나 <b>전환 0건</b> — 진단 결과 SOLD OUT 상태 + 상세페이지에 착용샷 부재가 원인.
-재입고 및 상세페이지 보강 후 같은 콘텐츠를 광고 소재로 전환 → 6/21부터 자사몰·무신사·W컨셉에서 동시에 판매 회복.
-</div>
-""", unsafe_allow_html=True)
-        cc1, cc2 = st.columns(2)
-        with cc1:
-            st.markdown("**평소 (6/15~6/20, 6일)**")
-            kc1, kc2, kc3 = st.columns(3)
-            with kc1: kpi_card("일평균 광고비", "32,376원")
-            with kc2: kpi_card("일평균 귀속매출", "46,192원")
-            with kc3: kpi_card("블렌디드 ROAS", "1.43배")
-        with cc2:
-            st.markdown("**호조 (6/21~6/23, 3일)**")
-            kc4, kc5, kc6 = st.columns(3)
-            with kc4: kpi_card("일평균 광고비", "52,500원", "+62%")
-            with kc5: kpi_card("일평균 귀속매출", "289,976원", "+528%", True)
-            with kc6: kpi_card("블렌디드 ROAS", "5.52배", "3.9배 개선", True)
-        st.markdown("""
-<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:14px;'>
-<b>핵심 교훈:</b> 광고비는 62%만 늘었는데 귀속매출은 528% 증가 — 매출 증가의 원인은 예산이 아니라 <b>소재 교체</b>였다.
-같은 1원이 평소엔 1.43원, 호조 기간엔 5.52원을 벌어들임. <b>예산 확대보다 소재 검증이 먼저</b>라는 근거.
-</div>
-""", unsafe_allow_html=True)
-
-    # ── 소재 운영 기준 ────────────────────────────────────────────
-    with st.expander("📏 소재 운영 기준 (벤치마크)", expanded=False):
-        st.markdown("""
+        with st.expander("📏 소재 운영 기준 (벤치마크)", expanded=False):
+            st.markdown("""
 <table style='width:100%;border-collapse:collapse;'>
 <thead><tr>
 <th style='text-align:left;padding:8px 10px;background:#F7F7F7;font-size:12px;border-bottom:2px solid #E8E8E8;'>지표</th>
@@ -3126,9 +3067,8 @@ with tab5:
 </table>
 """, unsafe_allow_html=True)
 
-    # ── 이탈 방지 체크리스트 ──────────────────────────────────────
-    with st.expander("🛡️ 콘텐츠 발행 전 체크리스트", expanded=False):
-        st.markdown("""
+        with st.expander("🛡️ 콘텐츠 발행 전 체크리스트", expanded=False):
+            st.markdown("""
 <div style='background:#F7F9FC;border-radius:10px;padding:18px 22px;'>
 ☐ <b>지금 사야 할 이유가 있는가</b> — 프리오더 마감일 · 한정수량 · 기한 있는 프로모션<br>
 ☐ <b>재고가 충분한가</b> — SOLD OUT 상태로 콘텐츠를 발행하면 유입이 전부 이탈됨<br>
@@ -3139,8 +3079,79 @@ with tab5:
 </div>
 """, unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.caption("이 플레이북은 대시보드에서 발견된 실제 성공/실패 사례가 누적될 때마다 업데이트됩니다.")
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.caption("이 플레이북은 대시보드에서 발견된 실제 성공/실패 사례가 누적될 때마다 업데이트됩니다.")
+
+    # ════════════════════════════════════════════════════════════
+    # 2depth — 사례 상세 페이지
+    # ════════════════════════════════════════════════════════════
+    else:
+        _view = st.session_state["pb_view"]
+        if st.button("← 표지로 돌아가기"):
+            st.session_state["pb_view"] = "cover"
+            st.rerun()
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if _view == "case1":
+            chart_container("✅ 사례 1 — 러닝쇼츠 프리오더 (2026-05-24)", "상시+리타겟팅 동시 집행")
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: kpi_card("유입", "117명")
+            with c2: kpi_card("CPC", "257원", "평균 대비 저렴", True)
+            with c3: kpi_card("전환", "4건")
+            with c4: kpi_card("ROAS", "6.15배", "목표 3배 이상", True)
+            st.markdown("""
+<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:10px;'>
+프리오더 마감일을 명시한 콘텐츠를 상시 캠페인 + 리타겟팅 캠페인에 동시 집행 — 신규 유입과 장바구니 재공략이 같은 날 맞물리며 CPC가 평균보다 크게 낮아짐.
+</div>
+""", unsafe_allow_html=True)
+
+        elif _view == "case2":
+            chart_container("✅ 사례 2 — 페이크 레이어드티 릴스 (2026-06-21~23)", "재고·상세페이지 보강 → 광고 전환 → ROAS 3.9배 개선")
+            st.markdown("""
+<div style='background:#FFF9E8;border-left:4px solid #F39C12;border-radius:6px;padding:14px 18px;margin-bottom:14px;'>
+<b>비하인드 스토리</b><br>
+6/17 오가닉 릴스는 저장·도달 반응이 좋았으나 <b>전환 0건</b> — 진단 결과 SOLD OUT 상태 + 상세페이지에 착용샷 부재가 원인.
+재입고 및 상세페이지 보강 후 같은 콘텐츠를 광고 소재로 전환 → 6/21부터 자사몰·무신사·W컨셉에서 동시에 판매 회복.
+</div>
+""", unsafe_allow_html=True)
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                st.markdown("**평소 (6/15~6/20, 6일)**")
+                kc1, kc2, kc3 = st.columns(3)
+                with kc1: kpi_card("일평균 광고비", "32,376원")
+                with kc2: kpi_card("일평균 귀속매출", "46,192원")
+                with kc3: kpi_card("블렌디드 ROAS", "1.43배")
+            with cc2:
+                st.markdown("**호조 (6/21~6/23, 3일)**")
+                kc4, kc5, kc6 = st.columns(3)
+                with kc4: kpi_card("일평균 광고비", "52,500원", "+62%")
+                with kc5: kpi_card("일평균 귀속매출", "289,976원", "+528%", True)
+                with kc6: kpi_card("블렌디드 ROAS", "5.52배", "3.9배 개선", True)
+            st.markdown("""
+<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:14px;'>
+<b>핵심 교훈:</b> 광고비는 62%만 늘었는데 귀속매출은 528% 증가 — 매출 증가의 원인은 예산이 아니라 <b>소재 교체</b>였다.
+같은 1원이 평소엔 1.43원, 호조 기간엔 5.52원을 벌어들임. <b>예산 확대보다 소재 검증이 먼저</b>라는 근거.
+</div>
+""", unsafe_allow_html=True)
+
+        elif _view == "case3":
+            chart_container("⚠️ 사례 3 — 페이크 레이어드티 전환 0건 (2026-06-17)", "재고·상세페이지 미비로 콘텐츠 반응이 매출로 못 이어진 케이스")
+            c1, c2, c3 = st.columns(3)
+            with c1: kpi_card("조회수·저장", "양호", "오가닉 반응 좋음")
+            with c2: kpi_card("전환", "0건", "", False)
+            with c3: kpi_card("재고 상태", "SOLD OUT", "", False)
+            st.markdown("""
+<div style='background:#FFF0F0;border-left:4px solid #E74C3C;border-radius:6px;padding:14px 18px;margin-top:14px;'>
+<b>원인 진단</b><br>
+① 상품이 SOLD OUT 상태 — 콘텐츠 보고 들어온 사람이 구매할 수 없었음<br>
+② 상세페이지 COLOR 섹션에 착용샷 없음 — 플랫레이만 있어 "레이어드 효과"가 전달 안 됨<br>
+③ 상세 설명 텍스트 부족 — 89,000원 가격을 설득할 근거 부재<br><br>
+<b>교훈:</b> 콘텐츠가 잘 만들어졌어도 커머스 인프라(재고·상세페이지)가 준비 안 되면 전환은 0건이 된다.
+이 사례가 재입고 + 상세페이지 보강으로 이어져 <a href='#' style='color:#27AE60;'>사례 2(6/21 전환 피크)</a>의 출발점이 됨.
+</div>
+""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
 
 
 # ── 푸터 ───────────────────────────────────────────────────────────
