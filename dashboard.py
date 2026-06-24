@@ -2993,27 +2993,28 @@ with tab5:
         ("이커머스",       "#9B59B6", _D,  62, 60),
         ("상품기획",       "#F7874F", _D,  62, 150),
     ]
-    _latest_case = {"date": "6/21", "text": "페이크레이어드 티\n릴스로 전환 피크"}
+    _latest_case = {"date": "6/21", "text": "페이크레이어드 티<br>릴스로 전환 피크"}
 
-    _honeycomb_html = "<div style='position:relative;height:160px;max-width:260px;margin:0 auto 4px;'>"
+    # 주의: st.markdown은 4칸 이상 들여쓰기된 줄을 코드블록으로 인식해 HTML이
+    # 그대로 텍스트로 노출됨 — 전체를 줄바꿈/들여쓰기 없는 한 줄 문자열로 생성
+    _parts = ["<div style='position:relative;height:160px;max-width:260px;margin:0 auto 4px;'>"]
     for key, color, size, top, left in _categories:
         is_featured = key == "퍼포먼스 마케팅"
-        _inner = (
-            f"<div style='font-size:11px;font-weight:700;color:{color};white-space:pre-line;line-height:1.25;text-align:center;padding:4px;'>"
-            f"<b style='font-size:12px;'>{_latest_case['date']}</b><br>{_latest_case['text']}</div>"
-            if is_featured else
-            f"<span style='font-size:11px;font-weight:600;color:{color};text-align:center;line-height:1.2;'>{key}</span>"
+        if is_featured:
+            _inner = (f"<div style='font-size:11px;font-weight:700;color:{color};line-height:1.25;text-align:center;padding:4px;'>"
+                       f"<b style='font-size:12px;'>{_latest_case['date']}</b><br>{_latest_case['text']}</div>")
+        else:
+            _inner = f"<span style='font-size:11px;font-weight:600;color:{color};text-align:center;line-height:1.2;'>{key}</span>"
+        _bg = f"{color}{'2E' if is_featured else '1F'}"
+        _z  = 2 if is_featured else 1
+        _parts.append(
+            f"<div style='position:absolute;top:{top}px;left:{left}px;width:{size}px;height:{size}px;"
+            f"border-radius:50%;background:{_bg};border:3px solid {color};display:flex;"
+            f"align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.08);z-index:{_z};'>"
+            f"{_inner}</div>"
         )
-        _honeycomb_html += f"""
-        <div style='position:absolute;top:{top}px;left:{left}px;
-                    width:{size}px;height:{size}px;border-radius:50%;
-                    background:{color}{"2E" if is_featured else "1F"};
-                    border:3px solid {color};display:flex;align-items:center;justify-content:center;
-                    box-shadow:0 2px 6px rgba(0,0,0,0.08);z-index:{2 if is_featured else 1};'>
-            {_inner}
-        </div>
-        """
-    _honeycomb_html += "</div>"
+    _parts.append("</div>")
+    _honeycomb_html = "".join(_parts)
     st.markdown(_honeycomb_html, unsafe_allow_html=True)
 
     st.caption("아래 영역을 눌러 카테고리별 사례를 펼쳐보세요")
