@@ -59,6 +59,7 @@ PLATFORM_COLORS = {
     "무신사":     "#222222",   # 무신사 블랙
     "Cafe24":     "#4ECBA0",   # 그린
     "지그재그":   "#FF9900",   # 지그재그 오렌지
+    "스마트스토어": "#03C75A", # 네이버 그린
 }
 
 st.set_page_config(
@@ -1279,12 +1280,22 @@ def update_cafe24_yesterday():
         COMM_CAFE24 = 3
         COMM_DEFAULT = 30
 
+        def _market_to_platform(market_id):
+            mid = (market_id or "").lower().strip()
+            if mid in MARKET_MAP:
+                return MARKET_MAP[mid]
+            # 스마트스토어 market_id 정확한 코드 미확인 — 패턴 매칭으로 우선 대응
+            if "naver" in mid or "smart" in mid:
+                return "스마트스토어"
+            return "Cafe24"
+
         headers = {
             "Authorization": f"Bearer {t['access_token']}",
             "X-Cafe24-Api-Version": "2026-03-01",
         }
+        # 정확한 엔드포인트: /api/v2/admin/orders (admin 빠지면 404)
         resp = _requests.get(
-            f"https://{t['shop_id']}.cafe24api.com/api/v2/orders",
+            f"https://{t['shop_id']}.cafe24api.com/api/v2/admin/orders",
             headers=headers,
             params={"start_date": date_str, "end_date": date_str,
                     "limit": 100, "embed": "items"},
@@ -1308,8 +1319,7 @@ def update_cafe24_yesterday():
 
         new_rows = []
         for order in orders:
-            mid      = (order.get("market_id") or "").lower().strip()
-            platform = MARKET_MAP.get(mid, "Cafe24")
+            platform = _market_to_platform(order.get("market_id"))
             order_date = (order.get("order_date") or "")[:10]
             items = order.get("items", [])
             for item in items:
@@ -1368,6 +1378,8 @@ with col_refresh:
             # Step 3: 어제 데이터 업데이트
             ok1, msg1 = update_ga4_yesterday()
             ok2, msg2 = update_meta_yesterday()
+            # Step 4: 자사몰(Cafe24+무신사+지그재그+스마트스토어) 어제 주문 업데이트
+            ok3, msg3 = update_cafe24_yesterday()
 
         # 결과 요약 — 성공/실패만 1회 표시
         errors = []
@@ -1375,6 +1387,7 @@ with col_refresh:
         if not ok_fill: errors.append(msg_fill)
         if not ok1:     errors.append(msg1)
         if not ok2:     errors.append(msg2)
+        if not ok3:     errors.append(msg3)
 
         if errors:
             st.toast("\n".join(errors), icon="⚠️")
@@ -2240,7 +2253,7 @@ with tab2:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 플랫폼별 미니 카드 ────────────────────────────────────────
-    platforms_avail = [p for p in ["29CM", "W컨셉", "SSF", "SI Village", "무신사", "지그재그", "Cafe24"]
+    platforms_avail = [p for p in ["29CM", "W컨셉", "SSF", "SI Village", "무신사", "지그재그", "스마트스토어", "Cafe24"]
                        if p in pf_normal["플랫폼"].values]
     if platforms_avail:
         pf_cols = st.columns(len(platforms_avail))

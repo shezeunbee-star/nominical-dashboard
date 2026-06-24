@@ -23,11 +23,17 @@ MARKET_PLATFORM_MAP = {
     "musinsa":  "무신사",   # 무신사
     "zigzag":   "지그재그", # 지그재그 (카카오스타일)
 }
-# 위 목록 외: self, NCHECKOUT 등 → 자사몰(Cafe24)
+# 위 목록 외: self, NCHECKOUT, mobile, shopn 등 → 자사몰(Cafe24)
+# 스마트스토어는 정확한 market_id 코드 미확인 — 첫 주문 발생 시 실제 코드로
+# MARKET_PLATFORM_MAP에 추가 필요. 그 전까지는 패턴 매칭으로 임시 대응.
 
 def market_to_platform(market_id):
     mid = (market_id or "").lower().strip()
-    return MARKET_PLATFORM_MAP.get(mid, "Cafe24")
+    if mid in MARKET_PLATFORM_MAP:
+        return MARKET_PLATFORM_MAP[mid]
+    if "naver" in mid or "smart" in mid:
+        return "스마트스토어"
+    return "Cafe24"
 
 # ── 토큰 관리 ─────────────────────────────────────────────────────
 def get_token():
