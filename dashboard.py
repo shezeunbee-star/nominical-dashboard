@@ -1494,10 +1494,11 @@ with tab1:
     chart_container("일별 방문자 · 전환 추이", "바이럴 스파이크, 광고 집행일, 전환 발생 패턴을 한눈에")
 
     fig1 = make_subplots(specs=[[{"secondary_y": True}]])
-    # 트레이스 추가 순서 = 그려지는 순서(나중 추가 = 위에 표시)
-    # 광고비를 먼저 그려서 뒤로 보내고, 방문자·전환수를 나중에 그려서 앞에 보이게 함
-    # secondary_y 파라미터를 주면 Plotly가 yaxis="y3" 지정을 무시하고 "y"로 덮어씀
-    # → secondary_y 없이 add_trace 호출해서 yaxis="y3"가 그대로 적용되게 함
+    # 중요: Plotly는 트레이스 추가 순서가 아니라 "축이 언제 등록됐는지"로 레이어를 쌓음.
+    # make_subplots가 처음에 만든 y/y2는 기본 레이어, update_layout()으로 나중에
+    # 추가하는 y3는 항상 그 위 레이어에 그려짐(트레이스 순서 무관).
+    # → 광고비는 처음부터 등록된 y2(secondary_y=True)에 둬서 기본 레이어에 머물게 하고,
+    #   전환수는 나중에 등록할 y3에 둬서 항상 위에 보이게 함
     fig1.add_trace(go.Bar(
         x=df["날짜"], y=df["광고비"],
         name="광고비",
@@ -1505,8 +1506,7 @@ with tab1:
         marker_line_color=COLOR["accent"],
         marker_line_width=1,
         hovertemplate="<b>%{x}</b><br>광고비: %{y:,}원<extra></extra>",
-        yaxis="y3",
-    ))
+    ), secondary_y=True)
     fig1.add_trace(go.Scatter(
         x=df["날짜"], y=df["방문자"],
         name="방문자",
@@ -1570,6 +1570,7 @@ with tab1:
         _hover_map.get(label, f"<b>📅 {label}</b><br>전환 없음")
         for label in df["날짜"]
     ]
+    # secondary_y 없이 yaxis="y3"로 직접 지정해서 나중에 등록되는 위쪽 레이어에 배치
     fig1.add_trace(go.Bar(
         x=df["날짜"], y=_conv_vals_full,
         name="전환수",
@@ -1578,7 +1579,8 @@ with tab1:
         width=0.4,
         text=_hover_texts_full,
         hovertemplate="%{text}<extra></extra>",
-    ), secondary_y=True)
+        yaxis="y3",
+    ))
 
     # annotation 라벨 (막대 위 텍스트, 보조축 기준)
     if not conv_df.empty:
@@ -1596,7 +1598,7 @@ with tab1:
             else:
                 _label = f"전환 {_conv_n_for_y}건"
             fig1.add_annotation(
-                x=_date_label, y=_conv_n_for_y, yref="y2",  # 보조축(전환수) 기준
+                x=_date_label, y=_conv_n_for_y, yref="y3",  # 전환수 축(y3) 기준
                 text=_label,
                 showarrow=True,
                 arrowhead=0, arrowwidth=1, arrowcolor="#27AE60",
@@ -1633,17 +1635,17 @@ with tab1:
                    title="방문자수", range=_vis_range),
         hovermode="x unified", barmode="overlay",
     )
+    # 광고비: make_subplots가 처음부터 만든 y2(기본 레이어)에 배치 → 숨김
     fig1.update_layout(yaxis2=dict(
+        overlaying="y", side="right", visible=False, showgrid=False,
+        range=_spend_range,
+    ))
+    # 전환수: update_layout으로 나중에 등록하는 y3(항상 위쪽 레이어) → 표시
+    fig1.update_layout(yaxis3=dict(
         overlaying="y", side="right", visible=True, showgrid=False,
         title="전환수", range=_conv_range,
         dtick=1 if _conv_max <= 6 else None,
-        tickfont=dict(size=11),
-    ))
-    # 광고비는 방문자/전환수와 별개의 숨김 축(y3)을 명시적으로 등록해야
-    # 방문자 축 범위 축소의 영향을 받지 않음 (anchor="free" 필요)
-    fig1.update_layout(yaxis3=dict(
-        overlaying="y", side="right", visible=False, showgrid=False,
-        range=_spend_range, anchor="free", position=1.0,
+        tickfont=dict(size=11), anchor="x",
     ))
     st.plotly_chart(fig1, use_container_width=True)
 
