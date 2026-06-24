@@ -2980,8 +2980,9 @@ with tab5:
     st.caption("데이터로 검증된 패턴을 선례로 남겨 다음 전략에 그대로 활용하기 위한 기록입니다.")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    if "pb_view" not in st.session_state:
-        st.session_state["pb_view"] = "cover"
+    # 원 자체를 클릭 영역으로 만들기 위해 <a href="?pb_view=..."> 링크 방식 사용
+    # (st.button은 원 모양으로 스타일링하기 까다로워 쿼리 파라미터 네비게이션으로 대체)
+    _pb_view = st.query_params.get("pb_view", "cover")
 
     # 사례 데이터 (good/bad 구분 + 카테고리 태그)
     _PB_CASES = {
@@ -2996,7 +2997,7 @@ with tab5:
     # ════════════════════════════════════════════════════════════
     # 1depth — 표지: Good Case / Bad Case 영역으로 나뉜 원형 카드
     # ════════════════════════════════════════════════════════════
-    if st.session_state["pb_view"] == "cover":
+    if _pb_view == "cover":
 
         def _render_zone(zone_type, zone_label, color, bg):
             st.markdown(
@@ -3008,21 +3009,20 @@ with tab5:
             for i, k in enumerate(_keys):
                 case = _PB_CASES[k]
                 with _cols[i]:
+                    # 원 전체가 <a> 링크 — 클릭하면 ?pb_view=케이스 로 이동해 2depth 렌더링
                     _circle_html = (
+                        f"<a href='?pb_view={k}' target='_self' style='text-decoration:none;cursor:pointer;display:block;'>"
                         f"<div style='width:110px;height:110px;border-radius:50%;background:{bg};"
                         f"border:3px solid {color};display:flex;align-items:center;justify-content:center;"
-                        f"margin:0 auto 8px;'>"
+                        f"margin:0 auto 8px;transition:transform 0.15s;'>"
                         f"<div style='font-size:11px;font-weight:700;color:{color};text-align:center;padding:6px;line-height:1.3;'>"
-                        f"<b style='font-size:12px;'>{case['date']}</b><br>{case['title']}</div></div>"
+                        f"<b style='font-size:12px;'>{case['date']}</b><br>{case['title']}</div></div></a>"
                     )
                     st.markdown(_circle_html, unsafe_allow_html=True)
                     st.markdown(
                         f"<div style='text-align:center;font-size:11px;color:#999;margin-bottom:6px;'>{' · '.join(case['categories'])}</div>",
                         unsafe_allow_html=True
                     )
-                    if st.button("자세히 보기", key=f"pb_open_{k}", use_container_width=True):
-                        st.session_state["pb_view"] = k
-                        st.rerun()
 
         col_good, col_bad = st.columns(2)
         with col_good:
@@ -3086,10 +3086,13 @@ with tab5:
     # 2depth — 사례 상세 페이지
     # ════════════════════════════════════════════════════════════
     else:
-        _view = st.session_state["pb_view"]
-        if st.button("← 표지로 돌아가기"):
-            st.session_state["pb_view"] = "cover"
-            st.rerun()
+        _view = _pb_view
+        st.markdown(
+            "<a href='?pb_view=cover' target='_self' style='text-decoration:none;font-size:14px;"
+            "color:#555;background:#F0F0F0;padding:7px 16px;border-radius:6px;display:inline-block;'>"
+            "← 표지로 돌아가기</a>",
+            unsafe_allow_html=True
+        )
         st.markdown("<br>", unsafe_allow_html=True)
 
         if _view == "case1":
