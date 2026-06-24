@@ -2981,34 +2981,37 @@ with tab5:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── 1depth 표지: 애플워치 스타일 허니콤 카테고리 ─────────────────
-    # 카테고리별 원형 버블이 겹쳐 보이는 표지 → 클릭하면 2depth(사례 상세)로 진입
+    # ── 1depth 표지: 애플워치 홈 화면 스타일 허니콤 그리드 ─────────────
+    # 균일한 크기의 원형 아이콘이 살짝 겹치며 벌집 모양으로 배치되는 표지
+    # (애플워치는 구형 곡면처럼 보이도록 행마다 좌우로 번갈아 오프셋을 줌)
+    _D  = 84   # 기본 원 지름
+    _DF = 100  # 강조(featured) 원 지름 — 가장 최근 사례
     _categories = [
-        {"key": "컨텐츠",       "color": "#4F8EF7", "size": 92,  "top": 0,   "left": 8},
-        {"key": "퍼포먼스 마케팅", "color": "#27AE60", "size": 110, "top": 10,  "left": 130},
-        {"key": "상품기획",      "color": "#F7874F", "size": 84,  "top": 95,  "left": 215},
-        {"key": "이커머스",      "color": "#9B59B6", "size": 96,  "top": 100, "left": 70},
+        # key, color, size, top, left
+        ("컨텐츠",         "#4F8EF7", _D,  0,  18),
+        ("퍼포먼스 마케팅", "#27AE60", _DF, 0,  108),
+        ("이커머스",       "#9B59B6", _D,  62, 60),
+        ("상품기획",       "#F7874F", _D,  62, 150),
     ]
     _latest_case = {"date": "6/21", "text": "페이크레이어드 티\n릴스로 전환 피크"}
 
-    _honeycomb_html = "<div style='position:relative;height:230px;max-width:330px;margin:0 auto 12px;'>"
-    for cat in _categories:
-        is_featured = cat["key"] == "퍼포먼스 마케팅"
+    _honeycomb_html = "<div style='position:relative;height:160px;max-width:260px;margin:0 auto 4px;'>"
+    for key, color, size, top, left in _categories:
+        is_featured = key == "퍼포먼스 마케팅"
         _inner = (
-            f"<div style='font-size:12px;font-weight:700;color:{cat['color']};white-space:pre-line;line-height:1.3;text-align:center;padding:6px;'>"
-            f"<b style='font-size:13px;'>{_latest_case['date']}</b><br>{_latest_case['text']}</div>"
-            if is_featured else ""
+            f"<div style='font-size:11px;font-weight:700;color:{color};white-space:pre-line;line-height:1.25;text-align:center;padding:4px;'>"
+            f"<b style='font-size:12px;'>{_latest_case['date']}</b><br>{_latest_case['text']}</div>"
+            if is_featured else
+            f"<span style='font-size:11px;font-weight:600;color:{color};text-align:center;line-height:1.2;'>{key}</span>"
         )
         _honeycomb_html += f"""
-        <div style='position:absolute;top:{cat["top"]}px;left:{cat["left"]}px;
-                    width:{cat["size"]}px;height:{cat["size"]}px;border-radius:50%;
-                    background:{cat["color"]}{"33" if is_featured else "1A"};
-                    border:3px solid {cat["color"]};display:flex;align-items:center;justify-content:center;
-                    box-shadow:0 2px 8px rgba(0,0,0,0.06);'>
+        <div style='position:absolute;top:{top}px;left:{left}px;
+                    width:{size}px;height:{size}px;border-radius:50%;
+                    background:{color}{"2E" if is_featured else "1F"};
+                    border:3px solid {color};display:flex;align-items:center;justify-content:center;
+                    box-shadow:0 2px 6px rgba(0,0,0,0.08);z-index:{2 if is_featured else 1};'>
             {_inner}
         </div>
-        <div style='position:absolute;top:{cat["top"]+cat["size"]+4}px;left:{cat["left"]}px;width:{cat["size"]}px;
-                    text-align:center;font-size:11px;color:#888;'>{"" if is_featured else cat["key"]}</div>
         """
     _honeycomb_html += "</div>"
     st.markdown(_honeycomb_html, unsafe_allow_html=True)
