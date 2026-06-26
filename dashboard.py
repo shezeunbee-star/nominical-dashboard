@@ -1615,13 +1615,25 @@ with tab1:
         for _d, _grp in _daily_cr.groupby("날짜"):
             _cr_by_date[_d] = _grp.sort_values("전환수", ascending=False)
 
+    # 실제 구매 채널(GA4 세션 source/medium 기준) — Meta 귀속과 별개로
+    # 인스타그램 오가닉 등에서 실제 발생한 구매를 명확히 구분하기 위함
+    _pcd_by_date = {}
+    if len(df) > 0:
+        _ok_pcd, _df_pcd_all = load_purchase_channel_detail(
+            df["날짜_dt"].min().strftime("%Y-%m-%d"), df["날짜_dt"].max().strftime("%Y-%m-%d")
+        )
+        if _ok_pcd and not _df_pcd_all.empty:
+            for _d, _grp in _df_pcd_all.groupby("날짜"):
+                _pcd_by_date[_d] = _grp.sort_values("구매건수", ascending=False)
+
     # 전환 발생일별 호버 텍스트 및 annotation 라벨 구성
     _hover_texts = []
     for _, _row in conv_df.iterrows():
         _date_key = str(_row["날짜_key"])  # YYYY-MM-DD
+        _date_label = str(_row["날짜"])     # M/D — 실제 구매 채널 조회용 키
         _total_conv = int(_row["전환_메타"]) if _row["전환_메타"] > 0 else int(_row["구매"])
 
-        # ① 유입 경로 (GA4 채널 데이터)
+        # ① 유입 경로 (GA4 세션 전체 — 그날 방문자 기준)
         _ch_lines = []
         _ch_pairs = [
             ("메타 유료광고", _row.get("유입_메타", 0)),
@@ -1634,7 +1646,13 @@ with tab1:
             if _v > 0:
                 _ch_lines.append(f"  {_ch}: {int(_v)}명")
 
-        # ② 전환 소재 (Meta daily breakdown)
+        # ② 실제 구매 채널 (GA4 트랜잭션 기준 — Meta 귀속과 무관하게 진짜 구매 발생 채널)
+        _pcd_lines = []
+        if _date_label in _pcd_by_date:
+            for _, _pc in _pcd_by_date[_date_label].iterrows():
+                _pcd_lines.append(f"  {_pc['유입채널']}: {int(_pc['구매건수'])}건 ({int(_pc['매출']):,}원)")
+
+        # ③ 전환 소재 (Meta daily breakdown — Meta 유료광고가 직접 기여한 경우만)
         _cr_lines = []
         if _date_key in _cr_by_date:
             for _i, (_, _cr) in enumerate(_cr_by_date[_date_key].head(5).iterrows(), 1):
@@ -1643,11 +1661,13 @@ with tab1:
         # 호버 HTML 조립
         _ht = f"<b>📅 {_date_key} · 전환 {_total_conv}건</b>"
         if _ch_lines:
-            _ht += "<br><br><b>유입 경로</b><br>" + "<br>".join(_ch_lines)
+            _ht += "<br><br><b>유입 경로 (방문자 기준)</b><br>" + "<br>".join(_ch_lines)
+        if _pcd_lines:
+            _ht += "<br><br><b>✅ 실제 구매 채널 (GA4 트랜잭션)</b><br>" + "<br>".join(_pcd_lines)
         if _cr_lines:
-            _ht += "<br><br><b>전환 소재 (Meta)</b><br>" + "<br>".join(_cr_lines)
-        elif not _cr_lines and not _daily_cr.empty:
-            _ht += "<br><br><i style='color:#999'>Meta 소재 데이터 없음 (자연유입)</i>"
+            _ht += "<br><br><b>Meta 전환 소재</b><br>" + "<br>".join(_cr_lines)
+        elif not _pcd_lines and not _cr_lines:
+            _ht += "<br><br><i style='color:#999'>구매 채널 데이터 없음</i>"
         _hover_texts.append(_ht)
 
     # 전환수 막대 (보조축) — 전체 날짜 기준, 0건인 날도 포함해서 표시
