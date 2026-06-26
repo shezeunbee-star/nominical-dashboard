@@ -290,10 +290,12 @@ def load_data():
     result["전환율"] = result.apply(
         lambda r: round(r["구매"] / r["방문자"] * 100, 2) if r["방문자"] > 0 else 0, axis=1
     )
-    # ROAS: Meta API에서 받은 ROAS 값 우선 사용, 없으면 GA4 매출 기준 계산
+    # ROAS: 광고 효율 지표이므로 Meta 자체 귀속 데이터만 사용 (GA4 매출과 섞지 않음)
+    # GA4는 추적 누락 이슈가 있어 실제 매출보다 적게 잡힐 수 있으므로,
+    # ROAS/CPO는 순수 Meta 기준 — 진짜 매출 확인은 "구매 전환 채널 상세" 또는
+    # 플랫폼별 매출 탭(Cafe24 실데이터)을 봐야 함
     result["ROAS"] = result.apply(
-        lambda r: round(float(r["ROAS_메타"]), 2) if r.get("ROAS_메타", 0) > 0
-        else (round(r["매출"] / r["광고비"], 2) if r["광고비"] > 0 and r["매출"] > 0 else 0),
+        lambda r: round(float(r["ROAS_메타"]), 2) if r.get("ROAS_메타", 0) > 0 else 0,
         axis=1
     )
 
