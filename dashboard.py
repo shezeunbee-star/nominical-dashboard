@@ -1303,6 +1303,45 @@ def update_meta_yesterday():
     return update_meta_for_date(yesterday)
 
 
+def _send_ga4_purchase_mp(order_id, value, items):
+    """GA4 Measurement Protocol로 purchase 이벤트 서버사이드 전송.
+    네이버페이 등 외부 결제는 nominical.co.kr 주문완료 페이지로 안 돌아오기 때문에
+    클라이언트 gtag 스크립트가 실행될 기회 자체가 없음 — Cafe24 주문 데이터를
+    기준으로 직접 GA4에 구매 이벤트를 쏘아 결제수단 무관하게 100% 추적되게 함.
+    (단, 실제 세션의 client_id가 없어 채널 귀속(source/medium)은 비어있을 수 있음 —
+    이건 전체 매출/전환수 정확도를 위한 보완이며 채널 분석은 별도 트래킹에 의존)
+    """
+    try:
+        measurement_id = st.secrets.get("ga4_measurement_id", "")
+        api_secret      = st.secrets.get("ga4_api_secret", "")
+        if not measurement_id or not api_secret:
+            return False
+        # order_id 기반 결정론적 client_id (같은 주문 재시도해도 동일 id 유지)
+        import hashlib
+        client_id = hashlib.md5(f"cafe24-{order_id}".encode()).hexdigest()[:16]
+        client_id = f"{client_id[:8]}.{client_id[8:]}"
+
+        payload = {
+            "client_id": client_id,
+            "events": [{
+                "name": "purchase",
+                "params": {
+                    "transaction_id": str(order_id),
+                    "currency": "KRW",
+                    "value": float(value),
+                    "items": items,
+                },
+            }],
+        }
+        resp = _requests.post(
+            f"https://www.google-analytics.com/mp/collect?measurement_id={measurement_id}&api_secret={api_secret}",
+            json=payload, timeout=10,
+        )
+        return resp.status_code in (200, 204)
+    except Exception:
+        return False
+
+
 def update_cafe24_yesterday():
     """어제 Cafe24(자사몰+무신사+지그재그) 주문을 플랫폼 매출 시트에 추가. (bool, str) 반환."""
     try:
@@ -1390,13 +1429,18 @@ def update_cafe24_yesterday():
                 existing_keys.add(f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}")
 
         new_rows = []
+        ga4_events = []  # (order_id, total_revenue, items) — 신규+정상 주문만 모아서 나중에 전송
         for order in orders:
             platform = _market_to_platform(order.get("market_id"))
             order_date = (order.get("order_date") or "")[:10]
             # Cafe24 API의 canceled 필드로 취소/반품 상태 판별
             # (order_place_name="스마트스토어" 주문 확인 시 canceled="T"인 건이 실제 존재함)
             status = "취소" if str(order.get("canceled", "")).upper() == "T" else "정상"
+            order_id_c24 = order.get("order_id", "")
             items = order.get("items", [])
+            order_total = 0
+            order_ga4_items = []
+            order_has_new = False
             for item in items:
                 name    = str(item.get("product_name", "-"))
                 code    = str(item.get("product_code", "-"))
@@ -1416,6 +1460,15 @@ def update_cafe24_yesterday():
                     new_rows.append([platform, order_date, name, code,
                                      color, size, qty, total, comm, profit, status])
                     existing_keys.add(key)
+                    order_has_new = True
+                order_total += total
+                order_ga4_items.append({"item_id": code, "item_name": name, "quantity": qty, "price": price})
+
+            # 신규(처음 동기화)이고 취소가 아닌 주문만 GA4로 구매 이벤트 전송
+            # — 결제수단(네이버페이 등)과 무관하게 Cafe24 주문 데이터 기준으로 100% 추적
+            if order_has_new and status != "취소" and order_total > 0:
+                ga4_events.append((order_id_c24 or f"{platform}-{order_date}-{len(ga4_events)}",
+                                    order_total, order_ga4_items))
 
         if new_rows:
             # 날짜순 정렬 후 append
@@ -1424,7 +1477,10 @@ def update_cafe24_yesterday():
             ws.resize(rows=1)
             ws.append_rows([existing_raw[0]] + all_data, value_input_option="USER_ENTERED")
 
-        return True, f"✅ Cafe24 {date_str} 완료 — {len(new_rows)}건 추가"
+        # GA4에 구매 이벤트 서버사이드 전송 (네이버페이 등 외부결제도 100% 추적)
+        ga4_sent = sum(1 for oid, val, its in ga4_events if _send_ga4_purchase_mp(oid, val, its))
+
+        return True, f"✅ Cafe24 {date_str} 완료 — {len(new_rows)}건 추가 (GA4 전송 {ga4_sent}/{len(ga4_events)})"
 
     except Exception as e:
         return False, f"❌ Cafe24 업데이트 실패: {e}"
