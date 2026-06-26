@@ -199,7 +199,7 @@ def load_data():
 
     gc = gspread.authorize(creds)
     ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
-    raw = ws.get("A2:W200", value_render_option="UNFORMATTED_VALUE")
+    raw = ws.get("A2:X200", value_render_option="UNFORMATTED_VALUE")
 
     headers = raw[0]
     rows = []
@@ -253,6 +253,7 @@ def load_data():
     ch_dir      = safe_num(headers[19])
     new_users   = safe_num(headers[20])
     ret_users   = safe_num(headers[21])
+    ch_ig_org   = safe_num(headers[23]) if len(headers) > 23 else pd.Series([0]*len(df))
 
     result = pd.DataFrame({
         "날짜":       date_col.values,
@@ -274,6 +275,7 @@ def load_data():
         "유입_직접":  ch_dir.values,
         "신규":       new_users.values,
         "재방문":     ret_users.values,
+        "유입_인스타오가닉": ch_ig_org.values if hasattr(ch_ig_org, "values") else ch_ig_org,
     })
 
     # CPO: 광고비 / Meta 전환수 (Meta 기준)
@@ -774,11 +776,16 @@ def update_ga4_yesterday():
             return int(float(r2.rows[0].metric_values[0].value)) if r2.rows else 0
 
         time.sleep(0.3)
+        # 메타 유료광고 (paid만 — meta/paid_feed, ig/paid)
         ch_meta     = get_channel("meta", "paid_feed") + get_channel("ig", "paid")
         time.sleep(0.3)
         ch_official = get_channel("instagram", "bio")
         time.sleep(0.3)
         ch_personal = get_channel("instagram", "personal_bio") + get_channel("instagram", "personal_story")
+        time.sleep(0.3)
+        # 인스타그램 오가닉 (ig/social, IGShopping/Social) — 개인/공식 계정 구분 불가
+        # (UTM 파라미터 없이는 어느 계정 콘텐츠인지 GA4가 알 수 없음)
+        ch_ig_organic = get_channel("ig", "social") + get_channel("IGShopping", "Social")
         time.sleep(0.3)
 
         f_direct  = FilterExpression(filter=Filter(field_name="sessionMedium",
@@ -813,6 +820,8 @@ def update_ga4_yesterday():
         )
         time.sleep(0.2)
         ws.update(values=[[new_users, returning_users]], range_name=f"U{row_idx}:V{row_idx}")
+        time.sleep(0.2)
+        ws.update(values=[[ch_ig_organic]], range_name=f"X{row_idx}")
 
         return True, f"✅ GA4 {day_label} 완료 — 방문자 {sessions:,}명 · 구매 {transactions}건"
 
@@ -883,6 +892,9 @@ def update_ga4_for_date(target_date):
         time.sleep(0.3)
         ch_personal = get_channel("instagram", "personal_bio") + get_channel("instagram", "personal_story")
         time.sleep(0.3)
+        # 인스타그램 오가닉 (ig/social, IGShopping/Social) — 개인/공식 계정 구분 불가
+        ch_ig_organic = get_channel("ig", "social") + get_channel("IGShopping", "Social")
+        time.sleep(0.3)
 
         f_direct  = FilterExpression(filter=Filter(field_name="sessionMedium",
             string_filter=Filter.StringFilter(value="(none)", match_type="EXACT")))
@@ -928,6 +940,7 @@ def update_ga4_for_date(target_date):
         ws.update_cell(row_idx, 20, ch_direct)         # T(idx19): 유입_직접
         ws.update_cell(row_idx, 21, new_users)         # U(idx20): 신규방문자
         ws.update_cell(row_idx, 22, returning_users)   # V(idx21): 재방문자
+        ws.update_cell(row_idx, 24, ch_ig_organic)     # X(idx23): 유입_인스타오가닉
 
         return True, f"✅ GA4 {day_label} 완료 — 방문자 {sessions:,}명 · 구매 {transactions}건"
 
@@ -1555,9 +1568,10 @@ with tab1:
         # ① 유입 경로 (GA4 채널 데이터)
         _ch_lines = []
         _ch_pairs = [
-            ("메타광고", _row.get("유입_메타", 0)),
-            ("공식 인스타", _row.get("유입_공식", 0)),
-            ("개인 인스타", _row.get("유입_개인", 0)),
+            ("메타 유료광고", _row.get("유입_메타", 0)),
+            ("인스타그램 오가닉(개인/공식 구분불가)", _row.get("유입_인스타오가닉", 0)),
+            ("공식 인스타 바이오", _row.get("유입_공식", 0)),
+            ("개인 인스타 바이오", _row.get("유입_개인", 0)),
             ("직접 방문", _row.get("유입_직접", 0)),
         ]
         for _ch, _v in sorted(_ch_pairs, key=lambda x: -x[1]):
@@ -1674,8 +1688,10 @@ with tab1:
         _max_day = df.loc[df["방문자"].idxmax()]
         _avg_vis = df["방문자"].mean()
         if _max_day["방문자"] > _avg_vis * 2:
-            _top_ch = max({"메타광고": _max_day["유입_메타"], "공식인스타": _max_day["유입_공식"],
-                           "개인인스타": _max_day["유입_개인"], "직접방문": _max_day["유입_직접"]}, key=lambda k: {"메타광고": _max_day["유입_메타"], "공식인스타": _max_day["유입_공식"], "개인인스타": _max_day["유입_개인"], "직접방문": _max_day["유입_직접"]}[k])
+            _ch_map = {"메타 유료광고": _max_day["유입_메타"], "인스타그램 오가닉": _max_day.get("유입_인스타오가닉", 0),
+                       "공식인스타 바이오": _max_day["유입_공식"], "개인인스타 바이오": _max_day["유입_개인"],
+                       "직접방문": _max_day["유입_직접"]}
+            _top_ch = max(_ch_map, key=_ch_map.get)
             _t1_lines.append(f"📈 <b>{_max_day['날짜']} 트래픽 스파이크</b> — 평균 대비 {round(_max_day['방문자']/_avg_vis,1)}배 급등, 주요 유입: {_top_ch}.")
     if total_purchases == 0 and total_spend > 0:
         _avg_b = df["이탈율"].replace(0, float("nan")).mean()
@@ -1848,10 +1864,11 @@ with tab1:
     with col_right:
         chart_container("채널별 누적 유입", "어디서 온 사람들이 가장 많은지")
         ch_totals = {
-            "메타광고":   int(df["유입_메타"].sum()),
-            "공식인스타": int(df["유입_공식"].sum()),
-            "개인인스타": int(df["유입_개인"].sum()),
-            "직접방문":   int(df["유입_직접"].sum()),
+            "메타 유료광고":     int(df["유입_메타"].sum()),
+            "인스타그램 오가닉": int(df.get("유입_인스타오가닉", pd.Series([0])).sum()),
+            "공식인스타 바이오": int(df["유입_공식"].sum()),
+            "개인인스타 바이오": int(df["유입_개인"].sum()),
+            "직접방문":          int(df["유입_직접"].sum()),
         }
         ch_totals = {k: v for k, v in ch_totals.items() if v > 0}
         if ch_totals:
@@ -1928,14 +1945,16 @@ with tab1:
     # 차트 5: 채널 유입 스택 바 (접기)
     with st.expander("📊 일별 채널 유입 상세 보기"):
         chart_container("일별 채널별 유입 구성", "어떤 날 어떤 채널이 트래픽을 이끌었는지")
-        ch_df = df[(df["유입_메타"] + df["유입_공식"] + df["유입_개인"] + df["유입_직접"]) > 0]
+        _ig_org_col = df.get("유입_인스타오가닉", pd.Series([0]*len(df)))
+        ch_df = df[(df["유입_메타"] + _ig_org_col + df["유입_공식"] + df["유입_개인"] + df["유입_직접"]) > 0]
         if not ch_df.empty:
             fig5 = go.Figure()
             for ch, col_key, color in [
-                ("메타광고",   "유입_메타",  "#1877F2"),
-                ("공식인스타", "유입_공식",  "#E1306C"),
-                ("개인인스타", "유입_개인",  "#F56040"),
-                ("직접방문",   "유입_직접",  "#1A1A1A"),
+                ("메타 유료광고",     "유입_메타",         "#1877F2"),
+                ("인스타그램 오가닉", "유입_인스타오가닉", "#C13584"),
+                ("공식인스타 바이오", "유입_공식",         "#E1306C"),
+                ("개인인스타 바이오", "유입_개인",         "#F56040"),
+                ("직접방문",          "유입_직접",         "#1A1A1A"),
             ]:
                 fig5.add_trace(go.Bar(x=ch_df["날짜"], y=ch_df[col_key],
                     name=ch, marker_color=color,
@@ -1978,10 +1997,10 @@ with tab1:
             max_day = df.loc[df["방문자"].idxmax()]
             avg_vis = df["방문자"].mean()
             if max_day["방문자"] > avg_vis * 2.5:
-                top_ch = max({"메타광고": max_day["유입_메타"], "공식인스타": max_day["유입_공식"],
-                              "개인인스타": max_day["유입_개인"], "직접방문": max_day["유입_직접"]},
-                             key=lambda k: {"메타광고": max_day["유입_메타"], "공식인스타": max_day["유입_공식"],
-                                            "개인인스타": max_day["유입_개인"], "직접방문": max_day["유입_직접"]}[k])
+                _top_ch_map = {"메타 유료광고": max_day["유입_메타"], "인스타그램 오가닉": max_day.get("유입_인스타오가닉", 0),
+                               "공식인스타 바이오": max_day["유입_공식"], "개인인스타 바이오": max_day["유입_개인"],
+                               "직접방문": max_day["유입_직접"]}
+                top_ch = max(_top_ch_map, key=_top_ch_map.get)
                 new_pct = round(max_day["신규"] / max_day["방문자"] * 100) if max_day["방문자"] > 0 else 0
                 insights.append(
                     f"**📈 최대 트래픽 스파이크: {max_day['날짜']}**\n"
@@ -2015,10 +2034,11 @@ with tab1:
             )
 
         ch_totals = {
-            "메타광고":   int(df["유입_메타"].sum()),
-            "공식인스타": int(df["유입_공식"].sum()),
-            "개인인스타": int(df["유입_개인"].sum()),
-            "직접방문":   int(df["유입_직접"].sum()),
+            "메타 유료광고":     int(df["유입_메타"].sum()),
+            "인스타그램 오가닉": int(df.get("유입_인스타오가닉", pd.Series([0])).sum()),
+            "공식인스타 바이오": int(df["유입_공식"].sum()),
+            "개인인스타 바이오": int(df["유입_개인"].sum()),
+            "직접방문":          int(df["유입_직접"].sum()),
         }
         top_ch    = max(ch_totals, key=ch_totals.get)
         ch_str    = " | ".join([f"{k} {v:,}명" for k, v in sorted(ch_totals.items(), key=lambda x: -x[1]) if v > 0])
