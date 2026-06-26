@@ -493,6 +493,57 @@ def load_meta_creative_fatigue(date_preset="last_14d"):
         return []
 
 
+@st.cache_data(ttl=600)
+def load_purchase_channel_detail(start_date, end_date):
+    """날짜별 source/medium 단위로 실제 구매가 발생한 채널 상세 조회.
+    GA4 Data API는 개별 거래ID까지는 못 주지만, 날짜+채널 단위로 어떤 구매가
+    어디서 발생했는지는 정확히 구분 가능. (bool, DataFrame) 반환."""
+    if not _GA4_AVAILABLE:
+        return False, pd.DataFrame()
+    try:
+        creds = _get_oauth_creds()
+        ga4 = BetaAnalyticsDataClient(credentials=creds)
+        res = ga4.run_report(RunReportRequest(
+            property="properties/536368183",
+            date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+            dimensions=[Dimension(name="date"), Dimension(name="sessionSource"), Dimension(name="sessionMedium")],
+            metrics=[Metric(name="transactions"), Metric(name="purchaseRevenue")],
+        ))
+
+        def _label_channel(src, med):
+            src, med = src.lower(), med.lower()
+            if src == "meta" and med == "paid_feed": return "메타 유료광고"
+            if src == "ig" and med == "paid":         return "메타 유료광고(IG)"
+            if src == "ig" and med == "social":        return "인스타그램 오가닉"
+            if src == "igshopping":                    return "인스타그램 오가닉(샵)"
+            if src == "instagram" and med == "personal_bio":   return "개인 인스타 바이오"
+            if src == "instagram" and med == "personal_story": return "개인 인스타 스토리"
+            if src == "instagram" and med == "bio":     return "공식 인스타 바이오"
+            if src == "(direct)":                       return "직접 방문"
+            return f"{src}/{med}"
+
+        rows = []
+        for row in res.rows:
+            trans = int(float(row.metric_values[0].value))
+            if trans <= 0:
+                continue
+            d   = row.dimension_values[0].value  # YYYYMMDD
+            src = row.dimension_values[1].value
+            med = row.dimension_values[2].value
+            rev = round(float(row.metric_values[1].value))
+            date_label = f"{int(d[4:6])}/{int(d[6:8])}"
+            rows.append({
+                "날짜": date_label, "_정렬용": d,
+                "유입채널": _label_channel(src, med),
+                "원본": f"{src}/{med}",
+                "구매건수": trans, "매출": rev,
+            })
+        df_out = pd.DataFrame(rows).sort_values("_정렬용", ascending=False).drop(columns="_정렬용") if rows else pd.DataFrame()
+        return True, df_out
+    except Exception as e:
+        return False, pd.DataFrame()
+
+
 def load_meta_daily_creative(date_preset="last_30d"):
     """날짜별 소재(Ad) 전환 데이터. 차트 annotation용. TTL=1시간."""
     try:
@@ -1969,6 +2020,34 @@ with tab1:
                 hovermode="x unified",
             )
             st.plotly_chart(fig5, use_container_width=True)
+
+    # 구매 전환 채널 상세 — "이 구매가 어디서 왔는지" 날짜+채널 단위로 추적
+    with st.expander("🛍️ 구매 전환 채널 상세 — 어떤 구매가 어디서 발생했는지"):
+        chart_container("구매 발생 채널 트래킹", "GA4 세션 source/medium 기준, 날짜별 실제 구매 내역")
+        if len(df) > 0:
+            _pcd_start = df["날짜_dt"].min().strftime("%Y-%m-%d")
+            _pcd_end   = df["날짜_dt"].max().strftime("%Y-%m-%d")
+            _ok_pcd, _df_pcd = load_purchase_channel_detail(_pcd_start, _pcd_end)
+            if _ok_pcd and not _df_pcd.empty:
+                st.dataframe(
+                    _df_pcd.rename(columns={"매출": "매출(원)"}),
+                    use_container_width=True, hide_index=True,
+                    column_config={
+                        "매출(원)": st.column_config.NumberColumn(format="%,d"),
+                    },
+                )
+                _ch_summary = _df_pcd.groupby("유입채널").agg(
+                    구매건수=("구매건수", "sum"), 매출=("매출", "sum")
+                ).reset_index().sort_values("구매건수", ascending=False)
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("**채널별 구매 합계**")
+                st.dataframe(
+                    _ch_summary.rename(columns={"매출": "매출(원)"}),
+                    use_container_width=True, hide_index=True,
+                    column_config={"매출(원)": st.column_config.NumberColumn(format="%,d")},
+                )
+            else:
+                st.info("이 기간 구매 데이터가 없어요.")
 
     def generate_period_insight(df):
         insights = []
