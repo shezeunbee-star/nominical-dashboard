@@ -3493,8 +3493,14 @@ with tab6:
     _th3 = lambda t: f"<th style='padding:8px 10px;background:#F7F7F7;font-size:12px;font-weight:600;color:#555;border-bottom:2px solid #E8E8E8;text-align:left;white-space:nowrap;'>{t}</th>"
     _td3 = lambda v, align="right": f"<td style='padding:7px 10px;font-size:13px;border-bottom:1px solid #F0F0F0;text-align:{align};white-space:nowrap;'>{v}</td>"
 
+    # 품번 → 컬러 → 사이즈(S/M/L 순) 순서로 정렬
+    _size_order = {"S": 0, "M": 1, "L": 2, "XL": 3, "FREE": 4, "-": 5}
+    _df_sorted = df_inv.copy()
+    _df_sorted["_사이즈순서"] = _df_sorted["사이즈"].map(_size_order).fillna(9)
+    _df_sorted = _df_sorted.sort_values(["품번", "컬러", "_사이즈순서"])
+
     _rows_html3 = ""
-    for _, r in df_inv.sort_values(["매칭키워드", "재고"]).iterrows():
+    for _, r in _df_sorted.iterrows():
         _color = _stock_badge(r["재고"])
         _rows_html3 += f"""<tr>
             {_td3(r['품번'], 'left')}
