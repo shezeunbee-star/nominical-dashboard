@@ -740,6 +740,77 @@ def load_platform_data():
     return df
 
 
+# ── 데이터 로드: 입고/재고 ──────────────────────────────────────────
+INVENTORY_SHEET_NAME = "📦 입고관리"
+
+@st.cache_data(ttl=300)
+def load_inventory_data():
+    """입고관리 시트(매칭키워드 기준) + 플랫폼 매출 시트를 매칭해서
+    상품 스타일 단위 판매량/재고를 계산. 색상·사이즈는 플랫폼별 표기가
+    너무 들쭉날쭉해서 매칭하지 않고 상품 단위로 합산함."""
+    SCOPES = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    if "gcp_service_account" in st.secrets:
+        creds = SACredentials.from_service_account_info(
+            st.secrets["gcp_service_account"], scopes=SCOPES
+        )
+    elif os.path.exists(SA_FILE):
+        creds = SACredentials.from_service_account_file(SA_FILE, scopes=SCOPES)
+    else:
+        creds = OAuthCredentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(SPREADSHEET_ID)
+
+    try:
+        ws_inv = sh.worksheet(INVENTORY_SHEET_NAME)
+    except Exception:
+        return pd.DataFrame()
+
+    inv_raw = ws_inv.get_all_values()
+    if len(inv_raw) <= 1:
+        return pd.DataFrame()
+
+    inv_rows = []
+    for r in inv_raw[1:]:
+        if not r or not r[0].strip():
+            continue
+        keyword   = r[0].strip()
+        disp_name = r[1].strip() if len(r) > 1 else keyword
+        try:
+            inbound = int(float(r[2])) if len(r) > 2 and r[2].strip() else 0
+        except ValueError:
+            inbound = 0
+        inbound_date = r[3].strip() if len(r) > 3 else ""
+        memo         = r[4].strip() if len(r) > 4 else ""
+        inv_rows.append({"매칭키워드": keyword, "상품명": disp_name,
+                          "입고수량": inbound, "입고일자": inbound_date, "비고": memo})
+
+    if not inv_rows:
+        return pd.DataFrame()
+
+    df_plat = load_platform_data()
+    if df_plat.empty:
+        for r in inv_rows:
+            r["판매수량"] = 0
+            r["매칭건수"] = 0
+    else:
+        normal = df_plat[~df_plat["주문상태"].str.contains("취소|반품", na=False, regex=True)]
+        for r in inv_rows:
+            kw = r["매칭키워드"]
+            matched = normal[normal["상품명"].str.contains(kw, case=False, na=False, regex=False)]
+            r["판매수량"] = int(matched["수량"].sum())
+            r["매칭건수"] = len(matched)
+
+    df = pd.DataFrame(inv_rows)
+    df["재고"] = df["입고수량"] - df["판매수량"]
+    return df
+
+
 # ══════════════════════════════════════════════════════════════════
 # 자동 업데이트 함수 (새로고침 버튼에서 호출)
 # ══════════════════════════════════════════════════════════════════
@@ -1530,9 +1601,9 @@ with col_refresh:
 st.markdown("---")
 
 # ── 탭 분기 ──────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 방문자 · 광고 성과", "🏬 플랫폼별 매출", "📅 기간별 매출 조회",
-    "📱 인스타그램 콘텐츠", "📖 플레이북",
+    "📱 인스타그램 콘텐츠", "📖 플레이북", "📦 입고·재고",
 ])
 
 
@@ -3337,6 +3408,90 @@ with tab5:
 """, unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
+
+
+# ════════════════════════════════════════════════════════════════
+# TAB 6: 입고·재고
+# ════════════════════════════════════════════════════════════════
+with tab6:
+    st.markdown("---")
+    st.markdown("### 📦 입고·재고 현황")
+    st.caption(
+        "입고수량은 '📦 입고관리' 시트에 직접 입력하면 자동 반영돼요. "
+        "판매수량은 플랫폼별 매출 데이터에서 상품명 키워드로 매칭해 집계합니다 "
+        "(색상·사이즈는 플랫폼마다 표기가 달라 상품 단위로만 집계해요)."
+    )
+
+    df_inv = load_inventory_data()
+
+    if df_inv.empty:
+        st.info("📦 입고관리 시트에 데이터가 없어요. 구글 시트에서 직접 입고수량을 입력해 주세요.")
+        st.stop()
+
+    # ── KPI 요약 ──────────────────────────────────────────────────
+    total_inbound = int(df_inv["입고수량"].sum())
+    total_sold    = int(df_inv["판매수량"].sum())
+    total_stock   = int(df_inv["재고"].sum())
+    out_of_stock  = len(df_inv[(df_inv["입고수량"] > 0) & (df_inv["재고"] <= 0)])
+    low_stock     = len(df_inv[(df_inv["재고"] > 0) & (df_inv["재고"] <= 5)])
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1: kpi_card("총 입고수량", f"{total_inbound:,}개")
+    with k2: kpi_card("총 판매수량", f"{total_sold:,}개")
+    with k3: kpi_card("총 재고", f"{total_stock:,}개")
+    with k4: kpi_card("품절 상품", f"{out_of_stock}개", "재고 0 이하", out_of_stock == 0)
+    with k5: kpi_card("재고 부족(5개 이하)", f"{low_stock}개", "", low_stock == 0)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 재고 부족/품절 알림 ───────────────────────────────────────
+    _alert_df = df_inv[(df_inv["입고수량"] > 0) & (df_inv["재고"] <= 5)].sort_values("재고")
+    if not _alert_df.empty:
+        _alert_lines = []
+        for _, r in _alert_df.iterrows():
+            _icon = "🚨" if r["재고"] <= 0 else "⚠️"
+            _alert_lines.append(f"{_icon} <b>{r['상품명']}</b> — 재고 {int(r['재고'])}개 (입고 {int(r['입고수량'])} · 판매 {int(r['판매수량'])})")
+        insight_box(_alert_lines, COLOR["orange"])
+        st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 전체 재고 현황 표 ─────────────────────────────────────────
+    chart_container("상품별 재고 현황", "입고 - 판매 = 재고")
+
+    def _stock_badge(v):
+        if v <= 0: return "#E74C3C"
+        if v <= 5: return "#F39C12"
+        return "#27AE60"
+
+    _th3 = lambda t: f"<th style='padding:8px 10px;background:#F7F7F7;font-size:12px;font-weight:600;color:#555;border-bottom:2px solid #E8E8E8;text-align:left;white-space:nowrap;'>{t}</th>"
+    _td3 = lambda v, align="right": f"<td style='padding:7px 10px;font-size:13px;border-bottom:1px solid #F0F0F0;text-align:{align};white-space:nowrap;'>{v}</td>"
+
+    _rows_html3 = ""
+    for _, r in df_inv.sort_values("재고").iterrows():
+        _color = _stock_badge(r["재고"])
+        _rows_html3 += f"""<tr>
+            {_td3(r['상품명'], 'left')}
+            {_td3(f"{int(r['입고수량']):,}")}
+            {_td3(f"{int(r['판매수량']):,}")}
+            <td style='padding:7px 10px;font-size:13px;font-weight:700;color:{_color};border-bottom:1px solid #F0F0F0;text-align:right;'>{int(r['재고']):,}</td>
+            {_td3(f"{int(r['매칭건수'])}건", 'center')}
+            {_td3(r['입고일자'] or '-', 'center')}
+        </tr>"""
+
+    st.markdown(f"""
+    <div style='overflow-x:auto;'>
+    <table style='width:100%;border-collapse:collapse;'>
+        <thead><tr>
+            {_th3('상품명')}{_th3('입고수량')}{_th3('판매수량')}{_th3('재고')}{_th3('매칭건수')}{_th3('입고일자')}
+        </tr></thead>
+        <tbody>{_rows_html3}</tbody>
+    </table></div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.caption(
+        "⚠️ 상품명 키워드 매칭이 부정확하면 '매칭건수'가 0이거나 비정상적으로 많을 수 있어요. "
+        "'📦 입고관리' 시트의 매칭키워드 열을 직접 수정해서 보정할 수 있습니다."
+    )
 
 
 # ── 푸터 ───────────────────────────────────────────────────────────
