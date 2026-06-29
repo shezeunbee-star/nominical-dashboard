@@ -815,6 +815,7 @@ def load_inventory_data():
             r["판매수량(기준일 이후)"] = 0
             r["매칭건수"] = 0
             r["최근7일판매"] = 0
+            r["최근3일판매"] = 0
             r["일평균판매"] = 0.0
     else:
         normal = df_plat[~df_plat["주문상태"].str.contains("취소|반품", na=False, regex=True)].copy()
@@ -842,11 +843,18 @@ def load_inventory_data():
             r["판매수량(기준일 이후)"] = int(m["수량"].sum())
             r["매칭건수"] = len(m)
 
-            # 최근 7일 평균 일판매량 (리오더 알림용)
-            recent_cutoff = pd.Timestamp.now() - pd.Timedelta(days=7)
-            recent_m = m[m["주문일_dt"] > recent_cutoff] if "주문일_dt" in m.columns else m.iloc[0:0]
-            r["최근7일판매"] = int(recent_m["수량"].sum())
-            r["일평균판매"] = round(r["최근7일판매"] / 7, 2)
+            # 최근 3일/7일 평균 일판매량 — 둘 중 더 빠른(위험한) 쪽을 리오더 판단에 사용
+            # (7일 평균만 쓰면 최근 며칠 급증한 판매 속도가 희석되어 늦게 잡힘)
+            now_ts = pd.Timestamp.now()
+            cutoff7 = now_ts - pd.Timedelta(days=7)
+            cutoff3 = now_ts - pd.Timedelta(days=3)
+            m7 = m[m["주문일_dt"] > cutoff7] if "주문일_dt" in m.columns else m.iloc[0:0]
+            m3 = m[m["주문일_dt"] > cutoff3] if "주문일_dt" in m.columns else m.iloc[0:0]
+            r["최근7일판매"] = int(m7["수량"].sum())
+            r["최근3일판매"] = int(m3["수량"].sum())
+            avg7 = r["최근7일판매"] / 7
+            avg3 = r["최근3일판매"] / 3
+            r["일평균판매"] = round(max(avg7, avg3), 2)
 
     df = pd.DataFrame(inv_rows)
     df["재고"] = df["기준재고"] - df["판매수량(기준일 이후)"]
