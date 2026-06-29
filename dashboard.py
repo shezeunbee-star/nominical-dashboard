@@ -866,7 +866,7 @@ def load_inventory_data():
             return None  # 최근 판매 없음 → 소진 임박 아님
         return round(row["재고"] / row["일평균판매"], 1)
     df["소진예상일"] = df.apply(_days_to_stockout, axis=1)
-    df["리오더필요"] = df["소진예상일"].apply(lambda d: d is not None and d <= PRODUCTION_LEAD_DAYS)
+    df["리오더필요"] = df["소진예상일"].apply(lambda d: pd.notna(d) and d <= PRODUCTION_LEAD_DAYS)
     return df
 
 
@@ -3555,7 +3555,7 @@ with tab6:
             {_td3(f"{int(r['판매수량(기준일 이후)']):,}")}
             <td style='padding:7px 10px;font-size:13px;font-weight:700;color:{_color};border-bottom:1px solid #F0F0F0;text-align:right;'>{int(r['재고']):,}</td>
             {_td3(f"{r['일평균판매']:.1f}개")}
-            {_td3(f"{r['소진예상일']}일" if r['소진예상일'] is not None else '-', 'center')}
+            {_td3(f"{r['소진예상일']}일" if pd.notna(r['소진예상일']) else '-', 'center')}
             {_td3(f"{int(r['매칭건수'])}건", 'center')}
             {_td3(r['비고'] or '-', 'left')}
         </tr>"""
