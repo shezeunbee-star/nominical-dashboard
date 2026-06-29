@@ -823,6 +823,10 @@ def load_inventory_data():
             size = r["사이즈"]
 
             m = normal[normal["상품명"].str.contains(kw, case=False, na=False, regex=False)]
+            # "(프리오더 ...)" 표기 상품은 별도 생산 배치(다른 재고 풀)이므로
+            # 매칭키워드 자체가 프리오더를 명시하지 않는 한 제외
+            if "프리오더" not in kw:
+                m = m[~m["상품명"].str.contains("프리오더", case=False, na=False, regex=False)]
             m = m[m["_컬러norm"] == color_norm]
             if size and size != "-":
                 m = m[m["사이즈"].astype(str).str.strip() == size]
