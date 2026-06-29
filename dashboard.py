@@ -743,11 +743,21 @@ def load_platform_data():
 # ── 데이터 로드: 입고/재고 ──────────────────────────────────────────
 INVENTORY_SHEET_NAME = "📦 입고관리"
 
+def _normalize_color(c):
+    """컬러 표기 차이 흡수 (공백 제거 + 알려진 동의어 통일)."""
+    c = str(c).strip().replace(" ", "")
+    synonyms = {
+        "레몬옐로우": "옐로우",
+        "멜란지그레이": "멜란지그레이",  # 이미 공백없음 기준
+    }
+    return synonyms.get(c, c)
+
 @st.cache_data(ttl=300)
 def load_inventory_data():
-    """입고관리 시트(매칭키워드 기준) + 플랫폼 매출 시트를 매칭해서
-    상품 스타일 단위 판매량/재고를 계산. 색상·사이즈는 플랫폼별 표기가
-    너무 들쭉날쭉해서 매칭하지 않고 상품 단위로 합산함."""
+    """입고관리 시트(품번/매칭키워드/컬러/사이즈/기준재고/기준일자) + 플랫폼
+    매출 시트를 매칭해서 현재 재고를 계산.
+    기준일자 이후 발생한 판매(취소·반품 제외)만 기준재고에서 차감함
+    — 기준재고 자체가 그 시점까지의 판매를 이미 반영한 스냅샷이기 때문."""
     SCOPES = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
@@ -779,16 +789,20 @@ def load_inventory_data():
     for r in inv_raw[1:]:
         if not r or not r[0].strip():
             continue
-        keyword   = r[0].strip()
-        disp_name = r[1].strip() if len(r) > 1 else keyword
+        style_no   = r[0].strip()
+        keyword    = r[1].strip() if len(r) > 1 else ""
+        color      = r[2].strip() if len(r) > 2 else "-"
+        size       = r[3].strip() if len(r) > 3 else "-"
         try:
-            inbound = int(float(r[2])) if len(r) > 2 and r[2].strip() else 0
+            baseline = int(float(r[4])) if len(r) > 4 and r[4].strip() else 0
         except ValueError:
-            inbound = 0
-        inbound_date = r[3].strip() if len(r) > 3 else ""
-        memo         = r[4].strip() if len(r) > 4 else ""
-        inv_rows.append({"매칭키워드": keyword, "상품명": disp_name,
-                          "입고수량": inbound, "입고일자": inbound_date, "비고": memo})
+            baseline = 0
+        baseline_date = r[5].strip() if len(r) > 5 else ""
+        memo          = r[6].strip() if len(r) > 6 else ""
+        inv_rows.append({
+            "품번": style_no, "매칭키워드": keyword, "컬러": color, "사이즈": size,
+            "기준재고": baseline, "기준일자": baseline_date, "비고": memo,
+        })
 
     if not inv_rows:
         return pd.DataFrame()
@@ -796,18 +810,32 @@ def load_inventory_data():
     df_plat = load_platform_data()
     if df_plat.empty:
         for r in inv_rows:
-            r["판매수량"] = 0
+            r["판매수량(기준일 이후)"] = 0
             r["매칭건수"] = 0
     else:
-        normal = df_plat[~df_plat["주문상태"].str.contains("취소|반품", na=False, regex=True)]
+        normal = df_plat[~df_plat["주문상태"].str.contains("취소|반품", na=False, regex=True)].copy()
+        normal["_컬러norm"] = normal["컬러"].apply(_normalize_color)
         for r in inv_rows:
             kw = r["매칭키워드"]
-            matched = normal[normal["상품명"].str.contains(kw, case=False, na=False, regex=False)]
-            r["판매수량"] = int(matched["수량"].sum())
-            r["매칭건수"] = len(matched)
+            color_norm = _normalize_color(r["컬러"])
+            size = r["사이즈"]
+
+            m = normal[normal["상품명"].str.contains(kw, case=False, na=False, regex=False)]
+            m = m[m["_컬러norm"] == color_norm]
+            if size and size != "-":
+                m = m[m["사이즈"].astype(str).str.strip() == size]
+            try:
+                cutoff = pd.Timestamp(r["기준일자"]) if r["기준일자"] else None
+            except Exception:
+                cutoff = None
+            if cutoff is not None and "주문일_dt" in m.columns:
+                m = m[m["주문일_dt"] > cutoff]
+
+            r["판매수량(기준일 이후)"] = int(m["수량"].sum())
+            r["매칭건수"] = len(m)
 
     df = pd.DataFrame(inv_rows)
-    df["재고"] = df["입고수량"] - df["판매수량"]
+    df["재고"] = df["기준재고"] - df["판매수량(기준일 이후)"]
     return df
 
 
@@ -3417,45 +3445,45 @@ with tab6:
     st.markdown("---")
     st.markdown("### 📦 입고·재고 현황")
     st.caption(
-        "입고수량은 '📦 입고관리' 시트에 직접 입력하면 자동 반영돼요. "
-        "판매수량은 플랫폼별 매출 데이터에서 상품명 키워드로 매칭해 집계합니다 "
-        "(색상·사이즈는 플랫폼마다 표기가 달라 상품 단위로만 집계해요)."
+        "기준재고는 재고 실사 시점의 수량 스냅샷이에요. 그 기준일자 이후 발생한 판매(취소·반품 제외)만 "
+        "차감해서 현재 재고를 계산합니다. (현재 26SS 4개 스타일만 색상·사이즈 단위로 추적 중)"
     )
 
     df_inv = load_inventory_data()
 
     if df_inv.empty:
-        st.info("📦 입고관리 시트에 데이터가 없어요. 구글 시트에서 직접 입고수량을 입력해 주세요.")
+        st.info("📦 입고관리 시트에 데이터가 없어요. 구글 시트에서 직접 기준재고를 입력해 주세요.")
         st.stop()
 
     # ── KPI 요약 ──────────────────────────────────────────────────
-    total_inbound = int(df_inv["입고수량"].sum())
-    total_sold    = int(df_inv["판매수량"].sum())
-    total_stock   = int(df_inv["재고"].sum())
-    out_of_stock  = len(df_inv[(df_inv["입고수량"] > 0) & (df_inv["재고"] <= 0)])
-    low_stock     = len(df_inv[(df_inv["재고"] > 0) & (df_inv["재고"] <= 5)])
+    total_baseline = int(df_inv["기준재고"].sum())
+    total_sold     = int(df_inv["판매수량(기준일 이후)"].sum())
+    total_stock    = int(df_inv["재고"].sum())
+    out_of_stock   = len(df_inv[(df_inv["기준재고"] > 0) & (df_inv["재고"] <= 0)])
+    low_stock      = len(df_inv[(df_inv["재고"] > 0) & (df_inv["재고"] <= 5)])
 
     k1, k2, k3, k4, k5 = st.columns(5)
-    with k1: kpi_card("총 입고수량", f"{total_inbound:,}개")
-    with k2: kpi_card("총 판매수량", f"{total_sold:,}개")
-    with k3: kpi_card("총 재고", f"{total_stock:,}개")
-    with k4: kpi_card("품절 상품", f"{out_of_stock}개", "재고 0 이하", out_of_stock == 0)
+    with k1: kpi_card("기준재고 합계", f"{total_baseline:,}개")
+    with k2: kpi_card("기준일 이후 판매", f"{total_sold:,}개")
+    with k3: kpi_card("현재 재고", f"{total_stock:,}개")
+    with k4: kpi_card("품절", f"{out_of_stock}개", "재고 0 이하", out_of_stock == 0)
     with k5: kpi_card("재고 부족(5개 이하)", f"{low_stock}개", "", low_stock == 0)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 재고 부족/품절 알림 ───────────────────────────────────────
-    _alert_df = df_inv[(df_inv["입고수량"] > 0) & (df_inv["재고"] <= 5)].sort_values("재고")
+    _alert_df = df_inv[(df_inv["기준재고"] > 0) & (df_inv["재고"] <= 5)].sort_values("재고")
     if not _alert_df.empty:
         _alert_lines = []
         for _, r in _alert_df.iterrows():
             _icon = "🚨" if r["재고"] <= 0 else "⚠️"
-            _alert_lines.append(f"{_icon} <b>{r['상품명']}</b> — 재고 {int(r['재고'])}개 (입고 {int(r['입고수량'])} · 판매 {int(r['판매수량'])})")
+            _label = f"{r['매칭키워드']} · {r['컬러']}" + (f" / {r['사이즈']}" if r["사이즈"] != "-" else "")
+            _alert_lines.append(f"{_icon} <b>{_label}</b> — 재고 {int(r['재고'])}개 (기준 {int(r['기준재고'])} · 판매 {int(r['판매수량(기준일 이후)'])})")
         insight_box(_alert_lines, COLOR["orange"])
         st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 전체 재고 현황 표 ─────────────────────────────────────────
-    chart_container("상품별 재고 현황", "입고 - 판매 = 재고")
+    chart_container("스타일·컬러·사이즈별 재고 현황", "기준재고 - 기준일 이후 판매 = 현재 재고")
 
     def _stock_badge(v):
         if v <= 0: return "#E74C3C"
@@ -3466,22 +3494,25 @@ with tab6:
     _td3 = lambda v, align="right": f"<td style='padding:7px 10px;font-size:13px;border-bottom:1px solid #F0F0F0;text-align:{align};white-space:nowrap;'>{v}</td>"
 
     _rows_html3 = ""
-    for _, r in df_inv.sort_values("재고").iterrows():
+    for _, r in df_inv.sort_values(["매칭키워드", "재고"]).iterrows():
         _color = _stock_badge(r["재고"])
         _rows_html3 += f"""<tr>
-            {_td3(r['상품명'], 'left')}
-            {_td3(f"{int(r['입고수량']):,}")}
-            {_td3(f"{int(r['판매수량']):,}")}
+            {_td3(r['품번'], 'left')}
+            {_td3(r['매칭키워드'], 'left')}
+            {_td3(r['컬러'], 'center')}
+            {_td3(r['사이즈'], 'center')}
+            {_td3(f"{int(r['기준재고']):,}")}
+            {_td3(f"{int(r['판매수량(기준일 이후)']):,}")}
             <td style='padding:7px 10px;font-size:13px;font-weight:700;color:{_color};border-bottom:1px solid #F0F0F0;text-align:right;'>{int(r['재고']):,}</td>
             {_td3(f"{int(r['매칭건수'])}건", 'center')}
-            {_td3(r['입고일자'] or '-', 'center')}
+            {_td3(r['비고'] or '-', 'left')}
         </tr>"""
 
     st.markdown(f"""
     <div style='overflow-x:auto;'>
     <table style='width:100%;border-collapse:collapse;'>
         <thead><tr>
-            {_th3('상품명')}{_th3('입고수량')}{_th3('판매수량')}{_th3('재고')}{_th3('매칭건수')}{_th3('입고일자')}
+            {_th3('품번')}{_th3('스타일')}{_th3('컬러')}{_th3('사이즈')}{_th3('기준재고')}{_th3('판매(기준일후)')}{_th3('현재재고')}{_th3('매칭건수')}{_th3('비고')}
         </tr></thead>
         <tbody>{_rows_html3}</tbody>
     </table></div>
@@ -3489,8 +3520,8 @@ with tab6:
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.caption(
-        "⚠️ 상품명 키워드 매칭이 부정확하면 '매칭건수'가 0이거나 비정상적으로 많을 수 있어요. "
-        "'📦 입고관리' 시트의 매칭키워드 열을 직접 수정해서 보정할 수 있습니다."
+        "⚠️ 매칭건수가 0이거나 비정상적으로 많으면 색상/사이즈 표기 차이일 수 있어요. "
+        "'📦 입고관리' 시트에서 매칭키워드·컬러·사이즈를 직접 수정해 보정할 수 있습니다."
     )
 
 
