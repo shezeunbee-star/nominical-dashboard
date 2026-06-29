@@ -799,8 +799,10 @@ def load_inventory_data():
             baseline = 0
         baseline_date = r[5].strip() if len(r) > 5 else ""
         memo          = r[6].strip() if len(r) > 6 else ""
+        full_name     = r[7].strip() if len(r) > 7 and r[7].strip() else keyword
         inv_rows.append({
-            "품번": style_no, "매칭키워드": keyword, "컬러": color, "사이즈": size,
+            "품번": style_no, "매칭키워드": keyword, "상품명": full_name,
+            "컬러": color, "사이즈": size,
             "기준재고": baseline, "기준일자": baseline_date, "비고": memo,
         })
 
@@ -3477,7 +3479,7 @@ with tab6:
         _alert_lines = []
         for _, r in _alert_df.iterrows():
             _icon = "🚨" if r["재고"] <= 0 else "⚠️"
-            _label = f"{r['매칭키워드']} · {r['컬러']}" + (f" / {r['사이즈']}" if r["사이즈"] != "-" else "")
+            _label = f"{r['상품명']} · {r['컬러']}" + (f" / {r['사이즈']}" if r["사이즈"] != "-" else "")
             _alert_lines.append(f"{_icon} <b>{_label}</b> — 재고 {int(r['재고'])}개 (기준 {int(r['기준재고'])} · 판매 {int(r['판매수량(기준일 이후)'])})")
         insight_box(_alert_lines, COLOR["orange"])
         st.markdown("<br>", unsafe_allow_html=True)
@@ -3504,7 +3506,7 @@ with tab6:
         _color = _stock_badge(r["재고"])
         _rows_html3 += f"""<tr>
             {_td3(r['품번'], 'left')}
-            {_td3(r['매칭키워드'], 'left')}
+            {_td3(r['상품명'], 'left')}
             {_td3(r['컬러'], 'center')}
             {_td3(r['사이즈'], 'center')}
             {_td3(f"{int(r['기준재고']):,}")}
@@ -3518,7 +3520,7 @@ with tab6:
     <div style='overflow-x:auto;'>
     <table style='width:100%;border-collapse:collapse;'>
         <thead><tr>
-            {_th3('품번')}{_th3('스타일')}{_th3('컬러')}{_th3('사이즈')}{_th3('기준재고')}{_th3('판매(기준일후)')}{_th3('현재재고')}{_th3('매칭건수')}{_th3('비고')}
+            {_th3('품번')}{_th3('상품명(Cafe24)')}{_th3('컬러')}{_th3('사이즈')}{_th3('기준재고')}{_th3('판매(기준일후)')}{_th3('현재재고')}{_th3('매칭건수')}{_th3('비고')}
         </tr></thead>
         <tbody>{_rows_html3}</tbody>
     </table></div>
