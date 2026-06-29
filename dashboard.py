@@ -814,6 +814,8 @@ def load_inventory_data():
         for r in inv_rows:
             r["판매수량(기준일 이후)"] = 0
             r["매칭건수"] = 0
+            r["최근7일판매"] = 0
+            r["일평균판매"] = 0.0
     else:
         normal = df_plat[~df_plat["주문상태"].str.contains("취소|반품", na=False, regex=True)].copy()
         normal["_컬러norm"] = normal["컬러"].apply(_normalize_color)
@@ -840,8 +842,23 @@ def load_inventory_data():
             r["판매수량(기준일 이후)"] = int(m["수량"].sum())
             r["매칭건수"] = len(m)
 
+            # 최근 7일 평균 일판매량 (리오더 알림용)
+            recent_cutoff = pd.Timestamp.now() - pd.Timedelta(days=7)
+            recent_m = m[m["주문일_dt"] > recent_cutoff] if "주문일_dt" in m.columns else m.iloc[0:0]
+            r["최근7일판매"] = int(recent_m["수량"].sum())
+            r["일평균판매"] = round(r["최근7일판매"] / 7, 2)
+
     df = pd.DataFrame(inv_rows)
     df["재고"] = df["기준재고"] - df["판매수량(기준일 이후)"]
+
+    # 소진예상일수 = 재고 / 일평균판매 (생산 리드타임 14일 감안해 리오더 필요 여부 판단)
+    PRODUCTION_LEAD_DAYS = 14
+    def _days_to_stockout(row):
+        if row["일평균판매"] <= 0:
+            return None  # 최근 판매 없음 → 소진 임박 아님
+        return round(row["재고"] / row["일평균판매"], 1)
+    df["소진예상일"] = df.apply(_days_to_stockout, axis=1)
+    df["리오더필요"] = df["소진예상일"].apply(lambda d: d is not None and d <= PRODUCTION_LEAD_DAYS)
     return df
 
 
@@ -3488,6 +3505,19 @@ with tab6:
         insight_box(_alert_lines, COLOR["orange"])
         st.markdown("<br>", unsafe_allow_html=True)
 
+    # ── 리오더 알림 (최근 7일 판매 속도 + 생산 리드타임 14일 감안) ──
+    _reorder_df = df_inv[df_inv["리오더필요"]].sort_values("소진예상일")
+    if not _reorder_df.empty:
+        _reorder_lines = []
+        for _, r in _reorder_df.iterrows():
+            _label = f"{r['상품명']} · {r['컬러']}" + (f" / {r['사이즈']}" if r["사이즈"] != "-" else "")
+            _reorder_lines.append(
+                f"🏭 <b>{_label}</b> — 소진예상 <b>{r['소진예상일']}일 후</b> "
+                f"(재고 {int(r['재고'])}개 ÷ 최근7일 일평균 {r['일평균판매']}개) · 생산기간 14일보다 짧아 지금 발주 필요"
+            )
+        insight_box(_reorder_lines, "#E74C3C")
+        st.markdown("<br>", unsafe_allow_html=True)
+
     # ── 전체 재고 현황 표 ─────────────────────────────────────────
     chart_container("스타일·컬러·사이즈별 재고 현황", "기준재고 - 기준일 이후 판매 = 현재 재고")
 
@@ -3516,6 +3546,8 @@ with tab6:
             {_td3(f"{int(r['기준재고']):,}")}
             {_td3(f"{int(r['판매수량(기준일 이후)']):,}")}
             <td style='padding:7px 10px;font-size:13px;font-weight:700;color:{_color};border-bottom:1px solid #F0F0F0;text-align:right;'>{int(r['재고']):,}</td>
+            {_td3(f"{r['일평균판매']:.1f}개")}
+            {_td3(f"{r['소진예상일']}일" if r['소진예상일'] is not None else '-', 'center')}
             {_td3(f"{int(r['매칭건수'])}건", 'center')}
             {_td3(r['비고'] or '-', 'left')}
         </tr>"""
@@ -3524,7 +3556,7 @@ with tab6:
     <div style='overflow-x:auto;'>
     <table style='width:100%;border-collapse:collapse;'>
         <thead><tr>
-            {_th3('품번')}{_th3('상품명(Cafe24)')}{_th3('컬러')}{_th3('사이즈')}{_th3('기준재고')}{_th3('판매(기준일후)')}{_th3('현재재고')}{_th3('매칭건수')}{_th3('비고')}
+            {_th3('품번')}{_th3('상품명(Cafe24)')}{_th3('컬러')}{_th3('사이즈')}{_th3('기준재고')}{_th3('판매(기준일후)')}{_th3('현재재고')}{_th3('일평균판매(7일)')}{_th3('소진예상일')}{_th3('매칭건수')}{_th3('비고')}
         </tr></thead>
         <tbody>{_rows_html3}</tbody>
     </table></div>
