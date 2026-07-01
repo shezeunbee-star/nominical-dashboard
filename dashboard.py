@@ -3448,6 +3448,17 @@ with tab5:
 같은 1원이 평소엔 1.43원, 호조 기간엔 5.52원을 벌어들임. <b>예산 확대보다 소재 검증이 먼저</b>라는 근거.
 </div>
 """, unsafe_allow_html=True)
+            st.markdown("""
+<div style='background:#F4F0FA;border-left:4px solid #9B59B6;border-radius:6px;padding:14px 18px;margin-top:12px;'>
+<b>🔍 왜 이탈이 적었나 — 전환 퍼널 해부</b><br><br>
+<span style='font-size:15px;'>오가닉 소재 → 광고 페이지 → 자사몰 → <b>리뷰 바로 노출</b> → 주문</span><br><br>
+이 흐름이 끊기지 않았던 게 핵심. 특히 <b>자사몰 진입 후 리뷰가 즉시 보인 것</b>이 결정적이었음.<br>
+처음 오는 고객 입장에서 "89,000원짜리 레이어드 티셔츠"는 망설임이 클 수밖에 없는데,<br>
+실제 착용 리뷰가 바로 보이면서 구매 확신을 줬다.<br><br>
+<b>액션 아이템:</b> 리뷰 관리는 광고만큼 중요한 전환 요소 — 신상품 런칭 초기에 리뷰 확보를 우선순위로 올릴 것.<br>
+리뷰가 없는 상태에서 광고 트래픽을 끌어오면 이탈률이 높아져 같은 광고비로 더 적은 전환이 나온다.
+</div>
+""", unsafe_allow_html=True)
 
         elif _view == "case3":
             chart_container("⚠️ 사례 3 — 페이크 레이어드티 전환 0건 (2026-06-17)", "재고·상세페이지 미비로 콘텐츠 반응이 매출로 못 이어진 케이스")
