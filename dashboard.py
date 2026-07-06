@@ -19,7 +19,7 @@ try:
     from google.analytics.data_v1beta import BetaAnalyticsDataClient
     from google.analytics.data_v1beta.types import (
         RunReportRequest, Dimension, Metric, DateRange,
-        FilterExpression, Filter, FilterExpressionList,
+        FilterExpression, Filter, FilterExpressionList, OrderBy,
     )
     _GA4_AVAILABLE = True
 except ImportError:
@@ -30,7 +30,7 @@ SPREADSHEET_ID      = "1y9mZirj81sR2tkkGV_wTzFvJonPdJU-JuErSRDo_73E"
 SHEET_NAME          = "📅 일별 트래킹"
 PLATFORM_SHEET_NAME = "🏬 플랫폼 매출"
 SA_FILE             = "/Users/kimeunbee/Documents/지표분析/service_account.json"
-TOKEN_FILE          = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
+TOKEN_FILE          = os.path.expanduser("~/.nominical_token.json")
 
 COLOR = {
     "primary":    "#1A1A1A",
@@ -75,15 +75,23 @@ st.set_page_config(
 )
 
 # ── 비밀번호 인증 ────────────────────────────────────────────────────
+def _auth_token(pw: str) -> str:
+    import hashlib
+    return hashlib.sha256(pw.encode()).hexdigest()[:24]
+
 def check_password():
     correct_pw = st.secrets.get("dashboard_password", "nominical2026")
 
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-
-    if st.session_state.authenticated:
+    # 1) 세션 state (같은 WebSocket 세션 내 빠른 체크)
+    if st.session_state.get("authenticated"):
         return True
 
+    # 2) URL 토큰 — 서버 재시작/세션 리셋 후에도 자동 재인증
+    if st.query_params.get("_t") == _auth_token(correct_pw):
+        st.session_state.authenticated = True
+        return True
+
+    # 3) 로그인 폼
     st.markdown("""
     <div style="max-width:360px;margin:15vh auto 0;text-align:center;">
         <div style="font-size:36px;margin-bottom:8px;">🏃</div>
@@ -98,6 +106,7 @@ def check_password():
         if st.button("로그인", use_container_width=True):
             if pw == correct_pw:
                 st.session_state.authenticated = True
+                st.query_params["_t"] = _auth_token(correct_pw)
                 st.rerun()
             else:
                 st.error("비밀번호가 틀렸어요.")
@@ -184,6 +193,19 @@ def chart_container(title, subtitle=""):
         st.markdown(f'<div class="section-sub">{subtitle}</div>', unsafe_allow_html=True)
 
 
+def _refresh_creds(creds):
+    import time as _time
+    from google.auth.transport.requests import Request as _Request
+    for _attempt in range(3):
+        try:
+            creds.refresh(_Request())
+            return
+        except Exception as _e:
+            if _attempt == 2:
+                raise
+            _time.sleep(2 ** _attempt)
+
+
 # ── 데이터 로드: 방문자/광고 ────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_data():
@@ -200,7 +222,7 @@ def load_data():
     else:
         creds = OAuthCredentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
         if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            _refresh_creds(creds)
 
     gc = gspread.authorize(creds)
     ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
@@ -696,7 +718,7 @@ def load_platform_data():
     else:
         creds = OAuthCredentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
         if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            _refresh_creds(creds)
 
     gc = gspread.authorize(creds)
     ws = gc.open_by_key(SPREADSHEET_ID).worksheet(PLATFORM_SHEET_NAME)
@@ -771,7 +793,7 @@ def load_inventory_data():
     else:
         creds = OAuthCredentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
         if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            _refresh_creds(creds)
 
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SPREADSHEET_ID)
@@ -884,7 +906,7 @@ def _get_sheet_creds(extra_scopes=None):
     token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
     creds = OAuthCredentials.from_authorized_user_file(token_path, scopes)
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        _refresh_creds(creds)
     return creds
 
 
@@ -907,7 +929,7 @@ def _get_oauth_creds():
         token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
         creds = OAuthCredentials.from_authorized_user_file(token_path, scopes)
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        _refresh_creds(creds)
     return creds
 
 
@@ -2486,6 +2508,170 @@ with tab1:
                 st.markdown(f"<div style='font-size:13px;line-height:1.8;padding:4px 0'>{line}</div>",
                             unsafe_allow_html=True)
 
+    # ════════════════════════════════════════════════════════════
+    # 상품 페이지별 전환율 섹션
+    # ════════════════════════════════════════════════════════════
+    st.markdown("---")
+    chart_container("🛍️ 상품 페이지별 유입 vs 전환율", "어느 상품에서 이탈이 많은지 — GA4 페이지 경로 기준")
+
+    @st.cache_data(ttl=3600)
+    def load_product_page_stats(days: int = 14):
+        if not _GA4_AVAILABLE:
+            return None, "GA4 패키지 없음"
+        try:
+            from datetime import date, timedelta
+            GA4_PROPERTY_ID = "536368183"
+            creds = _get_oauth_creds()
+            ga4   = BetaAnalyticsDataClient(credentials=creds)
+            end   = date.today() - timedelta(days=1)
+            start = end - timedelta(days=days - 1)
+            res = ga4.run_report(RunReportRequest(
+                property=f"properties/{GA4_PROPERTY_ID}",
+                dimensions=[Dimension(name="pagePath")],
+                metrics=[
+                    Metric(name="screenPageViews"),
+                    Metric(name="bounceRate"),
+                    Metric(name="conversions"),
+                    Metric(name="averageSessionDuration"),
+                ],
+                date_ranges=[DateRange(
+                    start_date=start.strftime("%Y-%m-%d"),
+                    end_date=end.strftime("%Y-%m-%d"),
+                )],
+                order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="screenPageViews"), desc=True)],
+                limit=50,
+            ))
+            rows = []
+            for row in res.rows:
+                path = row.dimension_values[0].value
+                if not any(kw in path for kw in ["/product/", "/goods/", "/item/"]):
+                    continue
+                views   = int(row.metric_values[0].value)
+                bounce  = round(float(row.metric_values[1].value) * 100, 1)
+                conv    = int(float(row.metric_values[2].value))
+                dur     = int(float(row.metric_values[3].value))
+                cvr     = round(conv / views * 100, 2) if views > 0 else 0
+                # 경로에서 상품명 추출 (Cafe24: /product/상품명/코드/)
+                parts = [p for p in path.split("/") if p]
+                name  = parts[1] if len(parts) >= 2 else path
+                name  = name.replace("-", " ").replace("%20", " ")[:40]
+                rows.append({
+                    "상품명": name,
+                    "경로": path,
+                    "조회수": views,
+                    "이탈률(%)": bounce,
+                    "전환수": conv,
+                    "전환율(%)": cvr,
+                    "평균체류(초)": dur,
+                })
+            import pandas as _pd
+            return _pd.DataFrame(rows), None
+        except Exception as e:
+            return None, str(e)
+
+    _pp_col1, _pp_col2 = st.columns([1, 5])
+    with _pp_col1:
+        _pp_days = st.selectbox("기간", [7, 14, 30], format_func=lambda x: f"최근 {x}일",
+                                key="pp_days_sel", label_visibility="collapsed")
+
+    df_pp, _pp_err = load_product_page_stats(_pp_days)
+
+    if _pp_err:
+        st.warning(f"데이터 로드 실패: {_pp_err}")
+    elif df_pp is None or df_pp.empty:
+        st.info("상품 페이지 방문 데이터가 없어요. GA4에 `/product/` 경로 데이터가 쌓이면 자동으로 표시됩니다.")
+    else:
+        # 차트: 조회수 vs 전환율 산점도
+        import plotly.express as _px
+        _fig_pp = _px.scatter(
+            df_pp,
+            x="조회수", y="전환율(%)",
+            size="조회수", color="이탈률(%)",
+            hover_name="상품명",
+            hover_data={"전환수": True, "평균체류(초)": True, "경로": False},
+            color_continuous_scale=[[0, "#27AE60"], [0.5, "#F39C12"], [1, "#E74C3C"]],
+            labels={"조회수": "페이지 조회수", "전환율(%)": "전환율 (%)"},
+            height=380,
+        )
+        _fig_pp.update_layout(
+            plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=10, r=10, t=20, b=10),
+            coloraxis_colorbar=dict(title="이탈률%", thickness=12),
+            font=dict(family="Pretendard, sans-serif", size=12),
+        )
+        _fig_pp.add_hline(y=df_pp["전환율(%)"].mean(), line_dash="dot",
+                          line_color="#8C8C8C", annotation_text="평균 전환율")
+        st.plotly_chart(_fig_pp, use_container_width=True)
+
+        # 테이블
+        _df_pp_disp = df_pp[["상품명","조회수","이탈률(%)","전환수","전환율(%)","평균체류(초)"]].copy()
+        _df_pp_disp = _df_pp_disp.sort_values("조회수", ascending=False).reset_index(drop=True)
+
+        def _color_bounce(val):
+            if val >= 70: return "color:#E74C3C;font-weight:700"
+            if val >= 50: return "color:#F39C12;font-weight:600"
+            return "color:#27AE60"
+
+        def _color_cvr(val):
+            if val >= 3: return "color:#27AE60;font-weight:700"
+            if val >= 1: return "color:#F39C12"
+            return "color:#E74C3C;font-weight:700"
+
+        rows_html = ""
+        for _, r in _df_pp_disp.iterrows():
+            _bc = _color_bounce(r["이탈률(%)"])
+            _cc = _color_cvr(r["전환율(%)"])
+            rows_html += (
+                f"<tr>"
+                f"<td style='padding:7px 10px;font-size:12px;max-width:220px;overflow:hidden;'>{r['상품명']}</td>"
+                f"<td style='padding:7px 10px;text-align:right;'>{r['조회수']:,}</td>"
+                f"<td style='padding:7px 10px;text-align:right;{_bc}'>{r['이탈률(%)']:.1f}%</td>"
+                f"<td style='padding:7px 10px;text-align:right;'>{int(r['전환수'])}</td>"
+                f"<td style='padding:7px 10px;text-align:right;{_cc}'>{r['전환율(%)']:.2f}%</td>"
+                f"<td style='padding:7px 10px;text-align:right;color:#8C8C8C;'>{int(r['평균체류(초)'])}초</td>"
+                f"</tr>"
+            )
+        st.markdown(f"""
+<table style='width:100%;border-collapse:collapse;font-size:13px;'>
+<thead><tr style='background:#F7F7F7;border-bottom:2px solid #E8E8E8;'>
+<th style='padding:8px 10px;text-align:left;'>상품명</th>
+<th style='padding:8px 10px;text-align:right;'>조회수</th>
+<th style='padding:8px 10px;text-align:right;'>이탈률</th>
+<th style='padding:8px 10px;text-align:right;'>전환수</th>
+<th style='padding:8px 10px;text-align:right;'>전환율</th>
+<th style='padding:8px 10px;text-align:right;'>평균체류</th>
+</tr></thead>
+<tbody>{rows_html}</tbody>
+</table>""", unsafe_allow_html=True)
+
+        # 인사이트
+        _high_bounce = df_pp[df_pp["이탈률(%)"] >= 70].sort_values("조회수", ascending=False)
+        _low_cvr     = df_pp[(df_pp["전환율(%)"] < 1) & (df_pp["조회수"] >= 30)].sort_values("조회수", ascending=False)
+        _pp_lines = []
+        if not _high_bounce.empty:
+            top = _high_bounce.iloc[0]
+            _pp_lines.append(
+                f"⚠️ <b>이탈률 70% 이상 상품 {len(_high_bounce)}개</b> — "
+                f"'{top['상품명']}' 조회수 {top['조회수']:,}회·이탈률 {top['이탈률(%)']:.0f}%. "
+                f"착용샷·리뷰·가격 설득력 점검 필요."
+            )
+        if not _low_cvr.empty:
+            top2 = _low_cvr.iloc[0]
+            _pp_lines.append(
+                f"💡 <b>조회수 있으나 전환율 1% 미만 상품 {len(_low_cvr)}개</b> — "
+                f"'{top2['상품명']}' {top2['조회수']:,}회 방문 중 전환 {int(top2['전환수'])}건. "
+                f"상세페이지 개선 우선순위 상품."
+            )
+        best = df_pp.sort_values("전환율(%)", ascending=False).iloc[0]
+        if best["전환율(%)"] > 0:
+            _pp_lines.append(
+                f"✅ <b>전환율 1위</b>: '{best['상품명']}' — {best['전환율(%)']:.2f}% "
+                f"(조회 {best['조회수']:,}회·전환 {int(best['전환수'])}건). 이 상품 광고 소재 우선 활용."
+            )
+        if _pp_lines:
+            st.markdown("<br>", unsafe_allow_html=True)
+            insight_box(_pp_lines, COLOR.get("orange", "#F39C12"))
+
 
 # ════════════════════════════════════════════════════════════════
 # TAB 2: 플랫폼별 매출 대시보드
@@ -3292,74 +3478,85 @@ with tab5:
     st.caption("데이터로 검증된 패턴을 선례로 남겨 다음 전략에 그대로 활용하기 위한 기록입니다.")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 원 자체를 클릭 영역으로 만들기 위해 <a href="?pb_view=..."> 링크 방식 사용
-    # (st.button은 원 모양으로 스타일링하기 까다로워 쿼리 파라미터 네비게이션으로 대체)
-    _pb_view = st.query_params.get("pb_view", "cover")
-
-    # 사례 데이터 (good/bad 구분 + 카테고리 태그)
-    _PB_CASES = {
-        "case1": {"type": "good", "date": "5/24",     "title": "러닝쇼츠 프리오더",
-                  "categories": ["퍼포먼스 마케팅", "이커머스"]},
-        "case2": {"type": "good", "date": "6/21~23",  "title": "페이크레이어드티 전환 피크",
-                  "categories": ["컨텐츠", "퍼포먼스 마케팅", "이커머스"]},
-        "case3": {"type": "bad",  "date": "6/17",     "title": "페이크레이어드티 전환 0건",
-                  "categories": ["상품기획", "이커머스"]},
-    }
-
     # ════════════════════════════════════════════════════════════
-    # 1depth — 표지: Good Case / Bad Case 영역으로 나뉜 원형 카드
+    # Good Case / Bad Case — expander 방식 (버튼 내비게이션 없음)
     # ════════════════════════════════════════════════════════════
-    if _pb_view == "cover":
+    col_good, col_bad = st.columns(2)
 
-        def _render_zone(zone_type, zone_label, color, bg):
-            st.markdown(
-                f"<div style='font-size:15px;font-weight:700;color:{color};margin-bottom:10px;'>{zone_label}</div>",
-                unsafe_allow_html=True
-            )
-            _keys = [k for k, v in _PB_CASES.items() if v["type"] == zone_type]
-            _cols = st.columns(len(_keys)) if _keys else []
-            for i, k in enumerate(_keys):
-                case = _PB_CASES[k]
-                with _cols[i]:
-                    # 원 전체가 <a> 링크 — 클릭하면 ?pb_view=케이스 로 이동해 2depth 렌더링
-                    _circle_html = (
-                        f"<a href='?pb_view={k}' target='_self' style='text-decoration:none;cursor:pointer;display:block;'>"
-                        f"<div style='width:110px;height:110px;border-radius:50%;background:{bg};"
-                        f"border:3px solid {color};display:flex;align-items:center;justify-content:center;"
-                        f"margin:0 auto 8px;transition:transform 0.15s;'>"
-                        f"<div style='font-size:11px;font-weight:700;color:{color};text-align:center;padding:6px;line-height:1.3;'>"
-                        f"<b style='font-size:12px;'>{case['date']}</b><br>{case['title']}</div></div></a>"
-                    )
-                    st.markdown(_circle_html, unsafe_allow_html=True)
-                    st.markdown(
-                        f"<div style='text-align:center;font-size:11px;color:#999;margin-bottom:6px;'>{' · '.join(case['categories'])}</div>",
-                        unsafe_allow_html=True
-                    )
+    with col_good:
+        st.markdown("<div style='font-size:15px;font-weight:700;color:#27AE60;margin-bottom:10px;'>✅ Good Case</div>", unsafe_allow_html=True)
 
-        col_good, col_bad = st.columns(2)
-        with col_good:
-            _render_zone("good", "✅ Good Case", "#27AE60", "#27AE601A")
-        with col_bad:
-            _render_zone("bad", "⚠️ Bad Case", "#E74C3C", "#E74C3C1A")
+        with st.expander("**5/24 — 러닝쇼츠 프리오더**  \n퍼포먼스 마케팅 · 이커머스", expanded=False):
+            chart_container("✅ 사례 1 — 러닝쇼츠 프리오더 (2026-05-24)", "상시+리타겟팅 동시 집행")
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: kpi_card("유입", "117명")
+            with c2: kpi_card("CPC", "257원", "평균 대비 저렴", True)
+            with c3: kpi_card("전환", "4건")
+            with c4: kpi_card("ROAS", "6.15배", "목표 3배 이상", True)
+            st.markdown("""<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:10px;'>
+프리오더 마감일을 명시한 콘텐츠를 상시 캠페인 + 리타겟팅 캠페인에 동시 집행 — 신규 유입과 장바구니 재공략이 같은 날 맞물리며 CPC가 평균보다 크게 낮아짐.
+</div>""", unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.caption("원을 누르면 해당 사례의 상세 인사이트로 이동합니다.")
+        with st.expander("**6/21~23 — 페이크레이어드티 전환 피크**  \n콘텐츠 · 퍼포먼스 마케팅 · 이커머스", expanded=False):
+            chart_container("✅ 사례 2 — 페이크 레이어드티 릴스 (2026-06-21~23)", "재고·상세페이지 보강 → 광고 전환 → ROAS 3.9배 개선")
+            st.markdown("""<div style='background:#FFF9E8;border-left:4px solid #F39C12;border-radius:6px;padding:14px 18px;margin-bottom:14px;'>
+<b>비하인드 스토리</b><br>
+6/17 오가닉 릴스는 저장·도달 반응이 좋았으나 <b>전환 0건</b> — 진단 결과 SOLD OUT 상태 + 상세페이지에 착용샷 부재가 원인.
+재입고 및 상세페이지 보강 후 같은 콘텐츠를 광고 소재로 전환 → 6/21부터 자사몰·무신사·W컨셉에서 동시에 판매 회복.
+</div>""", unsafe_allow_html=True)
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                st.markdown("**평소 (6/15~6/20, 6일)**")
+                kc1, kc2, kc3 = st.columns(3)
+                with kc1: kpi_card("일평균 광고비", "32,376원")
+                with kc2: kpi_card("일평균 귀속매출", "46,192원")
+                with kc3: kpi_card("블렌디드 ROAS", "1.43배")
+            with cc2:
+                st.markdown("**호조 (6/21~6/23, 3일)**")
+                kc4, kc5, kc6 = st.columns(3)
+                with kc4: kpi_card("일평균 광고비", "52,500원", "+62%")
+                with kc5: kpi_card("일평균 귀속매출", "289,976원", "+528%", True)
+                with kc6: kpi_card("블렌디드 ROAS", "5.52배", "3.9배 개선", True)
+            st.markdown("""<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:14px;'>
+<b>핵심 교훈:</b> 광고비는 62%만 늘었는데 귀속매출은 528% 증가 — 매출 증가의 원인은 예산이 아니라 <b>소재 교체</b>였다.
+같은 1원이 평소엔 1.43원, 호조 기간엔 5.52원을 벌어들임. <b>예산 확대보다 소재 검증이 먼저</b>라는 근거.
+</div>""", unsafe_allow_html=True)
+            st.markdown("""<div style='background:#F4F0FA;border-left:4px solid #9B59B6;border-radius:6px;padding:14px 18px;margin-top:12px;'>
+<b>🔍 왜 이탈이 적었나 — 전환 퍼널 해부</b><br><br>
+오가닉 소재 → 광고 페이지 → 자사몰 → <b>리뷰 바로 노출</b> → 주문<br><br>
+특히 <b>자사몰 진입 후 리뷰가 즉시 보인 것</b>이 결정적. 89,000원 제품에 대한 망설임을 리뷰가 해소했음.<br><br>
+<b>액션 아이템:</b> 리뷰 관리는 광고만큼 중요한 전환 요소 — 신상품 런칭 초기 리뷰 확보를 우선순위로.
+</div>""", unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.expander("📐 핵심 프레임워크 — 콘텐츠 → 커머스 → 광고", expanded=False):
-            st.markdown("""
-<div style='background:#F7F9FC;border-radius:10px;padding:20px 24px;margin-bottom:8px;'>
+    with col_bad:
+        st.markdown("<div style='font-size:15px;font-weight:700;color:#E74C3C;margin-bottom:10px;'>⚠️ Bad Case</div>", unsafe_allow_html=True)
+
+        with st.expander("**6/17 — 페이크레이어드티 전환 0건**  \n상품기획 · 이커머스", expanded=False):
+            chart_container("⚠️ 사례 3 — 페이크 레이어드티 전환 0건 (2026-06-17)", "재고·상세페이지 미비로 콘텐츠 반응이 매출로 못 이어진 케이스")
+            c1, c2, c3 = st.columns(3)
+            with c1: kpi_card("조회수·저장", "양호", "오가닉 반응 좋음")
+            with c2: kpi_card("전환", "0건", "", False)
+            with c3: kpi_card("재고 상태", "SOLD OUT", "", False)
+            st.markdown("""<div style='background:#FFF0F0;border-left:4px solid #E74C3C;border-radius:6px;padding:14px 18px;margin-top:14px;'>
+<b>원인 진단</b><br>
+① 상품이 SOLD OUT 상태 — 콘텐츠 보고 들어온 사람이 구매할 수 없었음<br>
+② 상세페이지 착용샷 부재 — 플랫레이만 있어 "레이어드 효과"가 전달 안 됨<br>
+③ 상세 설명 텍스트 부족 — 89,000원 가격을 설득할 근거 부재<br><br>
+<b>교훈:</b> 콘텐츠가 잘 만들어졌어도 커머스 인프라(재고·상세페이지)가 준비 안 되면 전환은 0건이 된다.
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("📐 핵심 프레임워크 — 콘텐츠 → 커머스 → 광고", expanded=False):
+        st.markdown("""<div style='background:#F7F9FC;border-radius:10px;padding:20px 24px;margin-bottom:8px;'>
 <b>올바른 실행 순서</b><br><br>
 ① <b>커머스 세팅 (선행)</b> — 프로모션 확정 · 상세페이지 강화 · 재고·배송 세팅<br>
 ② <b>콘텐츠 발행</b> — 커머스와 연결된 서사로 제작 (링크는 이미 살 수 있는 상태)<br>
 ③ <b>퍼포먼스 부스팅 (즉시)</b> — 반응 좋은 콘텐츠를 바로 광고 소재로 전환 + 리타겟팅 동시 집행<br><br>
 <i style='color:#888;'>예산을 늘리기 전에 소재 효율을 먼저 확인한다 — 검증된 오가닉 소재가 예산 확대보다 먼저다.</i>
-</div>
-""", unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
 
-        with st.expander("📏 소재 운영 기준 (벤치마크)", expanded=False):
-            st.markdown("""
-<table style='width:100%;border-collapse:collapse;'>
+    with st.expander("📏 소재 운영 기준 (벤치마크)", expanded=False):
+        st.markdown("""<table style='width:100%;border-collapse:collapse;'>
 <thead><tr>
 <th style='text-align:left;padding:8px 10px;background:#F7F7F7;font-size:12px;border-bottom:2px solid #E8E8E8;'>지표</th>
 <th style='text-align:left;padding:8px 10px;background:#F7F7F7;font-size:12px;border-bottom:2px solid #E8E8E8;'>정상</th>
@@ -3376,108 +3573,20 @@ with tab5:
 <tr><td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;'>캠페인 예산 배분</td>
 <td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;' colspan='3'>상시 70% (신규 유입·픽셀 누적) : 리타겟팅 30% (장바구니·방문자 재공략)</td></tr>
 </tbody>
-</table>
-""", unsafe_allow_html=True)
+</table>""", unsafe_allow_html=True)
 
-        with st.expander("🛡️ 콘텐츠 발행 전 체크리스트", expanded=False):
-            st.markdown("""
-<div style='background:#F7F9FC;border-radius:10px;padding:18px 22px;'>
+    with st.expander("🛡️ 콘텐츠 발행 전 체크리스트", expanded=False):
+        st.markdown("""<div style='background:#F7F9FC;border-radius:10px;padding:18px 22px;'>
 ☐ <b>지금 사야 할 이유가 있는가</b> — 프리오더 마감일 · 한정수량 · 기한 있는 프로모션<br>
 ☐ <b>재고가 충분한가</b> — SOLD OUT 상태로 콘텐츠를 발행하면 유입이 전부 이탈됨<br>
 ☐ <b>상세페이지에 착용샷이 있는가</b> — 콘텐츠 톤과 이어지는 서사형 구성, 첫 이미지는 반드시 착용샷<br>
 ☐ <b>퍼널이 짧은가</b> — 콘텐츠 → 구매까지 클릭 수 최소화<br>
 ☐ <b>리타겟팅이 세팅되어 있는가</b> — 장바구니 이탈자 48시간 내 재접촉<br>
 ☐ <b>날씨·요일을 고려했는가</b> — 일요일 저녁 발행 → 월~화 구매 전환 패턴 확인됨
-</div>
-""", unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.caption("이 플레이북은 대시보드에서 발견된 실제 성공/실패 사례가 누적될 때마다 업데이트됩니다.")
-
-    # ════════════════════════════════════════════════════════════
-    # 2depth — 사례 상세 페이지
-    # ════════════════════════════════════════════════════════════
-    else:
-        _view = _pb_view
-        st.markdown(
-            "<a href='?pb_view=cover' target='_self' style='text-decoration:none;font-size:14px;"
-            "color:#555;background:#F0F0F0;padding:7px 16px;border-radius:6px;display:inline-block;'>"
-            "← 표지로 돌아가기</a>",
-            unsafe_allow_html=True
-        )
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        if _view == "case1":
-            chart_container("✅ 사례 1 — 러닝쇼츠 프리오더 (2026-05-24)", "상시+리타겟팅 동시 집행")
-            c1, c2, c3, c4 = st.columns(4)
-            with c1: kpi_card("유입", "117명")
-            with c2: kpi_card("CPC", "257원", "평균 대비 저렴", True)
-            with c3: kpi_card("전환", "4건")
-            with c4: kpi_card("ROAS", "6.15배", "목표 3배 이상", True)
-            st.markdown("""
-<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:10px;'>
-프리오더 마감일을 명시한 콘텐츠를 상시 캠페인 + 리타겟팅 캠페인에 동시 집행 — 신규 유입과 장바구니 재공략이 같은 날 맞물리며 CPC가 평균보다 크게 낮아짐.
-</div>
-""", unsafe_allow_html=True)
-
-        elif _view == "case2":
-            chart_container("✅ 사례 2 — 페이크 레이어드티 릴스 (2026-06-21~23)", "재고·상세페이지 보강 → 광고 전환 → ROAS 3.9배 개선")
-            st.markdown("""
-<div style='background:#FFF9E8;border-left:4px solid #F39C12;border-radius:6px;padding:14px 18px;margin-bottom:14px;'>
-<b>비하인드 스토리</b><br>
-6/17 오가닉 릴스는 저장·도달 반응이 좋았으나 <b>전환 0건</b> — 진단 결과 SOLD OUT 상태 + 상세페이지에 착용샷 부재가 원인.
-재입고 및 상세페이지 보강 후 같은 콘텐츠를 광고 소재로 전환 → 6/21부터 자사몰·무신사·W컨셉에서 동시에 판매 회복.
-</div>
-""", unsafe_allow_html=True)
-            cc1, cc2 = st.columns(2)
-            with cc1:
-                st.markdown("**평소 (6/15~6/20, 6일)**")
-                kc1, kc2, kc3 = st.columns(3)
-                with kc1: kpi_card("일평균 광고비", "32,376원")
-                with kc2: kpi_card("일평균 귀속매출", "46,192원")
-                with kc3: kpi_card("블렌디드 ROAS", "1.43배")
-            with cc2:
-                st.markdown("**호조 (6/21~6/23, 3일)**")
-                kc4, kc5, kc6 = st.columns(3)
-                with kc4: kpi_card("일평균 광고비", "52,500원", "+62%")
-                with kc5: kpi_card("일평균 귀속매출", "289,976원", "+528%", True)
-                with kc6: kpi_card("블렌디드 ROAS", "5.52배", "3.9배 개선", True)
-            st.markdown("""
-<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:14px;'>
-<b>핵심 교훈:</b> 광고비는 62%만 늘었는데 귀속매출은 528% 증가 — 매출 증가의 원인은 예산이 아니라 <b>소재 교체</b>였다.
-같은 1원이 평소엔 1.43원, 호조 기간엔 5.52원을 벌어들임. <b>예산 확대보다 소재 검증이 먼저</b>라는 근거.
-</div>
-""", unsafe_allow_html=True)
-            st.markdown("""
-<div style='background:#F4F0FA;border-left:4px solid #9B59B6;border-radius:6px;padding:14px 18px;margin-top:12px;'>
-<b>🔍 왜 이탈이 적었나 — 전환 퍼널 해부</b><br><br>
-<span style='font-size:15px;'>오가닉 소재 → 광고 페이지 → 자사몰 → <b>리뷰 바로 노출</b> → 주문</span><br><br>
-이 흐름이 끊기지 않았던 게 핵심. 특히 <b>자사몰 진입 후 리뷰가 즉시 보인 것</b>이 결정적이었음.<br>
-처음 오는 고객 입장에서 "89,000원짜리 레이어드 티셔츠"는 망설임이 클 수밖에 없는데,<br>
-실제 착용 리뷰가 바로 보이면서 구매 확신을 줬다.<br><br>
-<b>액션 아이템:</b> 리뷰 관리는 광고만큼 중요한 전환 요소 — 신상품 런칭 초기에 리뷰 확보를 우선순위로 올릴 것.<br>
-리뷰가 없는 상태에서 광고 트래픽을 끌어오면 이탈률이 높아져 같은 광고비로 더 적은 전환이 나온다.
-</div>
-""", unsafe_allow_html=True)
-
-        elif _view == "case3":
-            chart_container("⚠️ 사례 3 — 페이크 레이어드티 전환 0건 (2026-06-17)", "재고·상세페이지 미비로 콘텐츠 반응이 매출로 못 이어진 케이스")
-            c1, c2, c3 = st.columns(3)
-            with c1: kpi_card("조회수·저장", "양호", "오가닉 반응 좋음")
-            with c2: kpi_card("전환", "0건", "", False)
-            with c3: kpi_card("재고 상태", "SOLD OUT", "", False)
-            st.markdown("""
-<div style='background:#FFF0F0;border-left:4px solid #E74C3C;border-radius:6px;padding:14px 18px;margin-top:14px;'>
-<b>원인 진단</b><br>
-① 상품이 SOLD OUT 상태 — 콘텐츠 보고 들어온 사람이 구매할 수 없었음<br>
-② 상세페이지 COLOR 섹션에 착용샷 없음 — 플랫레이만 있어 "레이어드 효과"가 전달 안 됨<br>
-③ 상세 설명 텍스트 부족 — 89,000원 가격을 설득할 근거 부재<br><br>
-<b>교훈:</b> 콘텐츠가 잘 만들어졌어도 커머스 인프라(재고·상세페이지)가 준비 안 되면 전환은 0건이 된다.
-이 사례가 재입고 + 상세페이지 보강으로 이어져 <a href='#' style='color:#27AE60;'>사례 2(6/21 전환 피크)</a>의 출발점이 됨.
-</div>
-""", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.caption("이 플레이북은 대시보드에서 발견된 실제 성공/실패 사례가 누적될 때마다 업데이트됩니다.")
 
 
 # ════════════════════════════════════════════════════════════════

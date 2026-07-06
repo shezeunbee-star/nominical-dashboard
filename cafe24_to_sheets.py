@@ -4,7 +4,7 @@ Cafe24 주문 → 구글 시트 자동 정리
   예시: python3 cafe24_to_sheets.py 2026-05-01 2026-05-26
   날짜 생략 시 오늘 기준 최근 30일
 """
-import sys, os, json, requests, base64, re, gspread
+import sys, os, json, requests, base64, re, gspread, hashlib
 from datetime import datetime, timedelta
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -168,6 +168,74 @@ def get_existing_keys(ws):
             keys.add(f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}")
     return keys
 
+# ── GA4 Measurement Protocol (서버사이드 구매 추적) ────────────────
+def _load_ga4_secrets():
+    secrets_path = os.path.join(BASE_DIR, ".streamlit", "secrets.toml")
+    if not os.path.exists(secrets_path):
+        return None, None
+    with open(secrets_path) as f:
+        content = f.read()
+    mid = re.search(r'ga4_measurement_id\s*=\s*["\']([^"\']+)["\']', content)
+    sec = re.search(r'ga4_api_secret\s*=\s*["\']([^"\']+)["\']', content)
+    return (mid.group(1) if mid else None), (sec.group(1) if sec else None)
+
+def send_ga4_purchase_mp(order_id, value, items, measurement_id, api_secret):
+    """결제수단(네이버페이 등 외부결제 포함)과 무관하게 Cafe24 주문 데이터를
+    기준으로 GA4에 구매 이벤트를 직접 전송 (클라이언트 gtag 의존 안 함)."""
+    try:
+        client_id = hashlib.md5(f"cafe24-{order_id}".encode()).hexdigest()[:16]
+        client_id = f"{client_id[:8]}.{client_id[8:]}"
+        payload = {
+            "client_id": client_id,
+            "events": [{
+                "name": "purchase",
+                "params": {
+                    "transaction_id": str(order_id),
+                    "currency": "KRW",
+                    "value": float(value),
+                    "items": items,
+                },
+            }],
+        }
+        resp = requests.post(
+            f"https://www.google-analytics.com/mp/collect?measurement_id={measurement_id}&api_secret={api_secret}",
+            json=payload, timeout=10,
+        )
+        return resp.status_code in (200, 204)
+    except Exception:
+        return False
+
+def build_ga4_events(orders, existing_keys_before):
+    """orders 원본에서 신규(미동기화)+정상 상태인 주문만 모아 GA4 전송용으로 집계."""
+    events = []
+    for order in orders:
+        platform   = market_to_platform(order.get("market_id", "self"))
+        order_date = (order.get("order_date") or "")[:10]
+        status     = parse_status(order)
+        order_id   = order.get("order_id", "")
+        items      = order.get("items", [])
+        if not items:
+            continue
+        total = 0
+        ga4_items = []
+        has_new = False
+        for item in items:
+            color, size = parse_option(item.get("option_value", ""))
+            qty   = int(float(item.get("quantity", 1) or 1))
+            price = int(float(item.get("product_price", 0) or 0))
+            total += price * qty
+            ga4_items.append({
+                "item_id": str(item.get("product_code", "-")),
+                "item_name": str(item.get("product_name", "-")),
+                "quantity": qty, "price": price,
+            })
+            key = f"{platform}|{order_date}|{item.get('product_code','-')}|{color}|{size}"
+            if key not in existing_keys_before:
+                has_new = True
+        if has_new and status != "취소" and total > 0:
+            events.append((order_id or f"{platform}-{order_date}-{len(events)}", total, ga4_items))
+    return events
+
 # ── 메인 ─────────────────────────────────────────────────────────
 def main():
     start = sys.argv[1] if len(sys.argv) > 1 else (datetime.now()-timedelta(days=30)).strftime("%Y-%m-%d")
@@ -185,6 +253,7 @@ def main():
 
     ws       = get_sheet()
     existing = get_existing_keys(ws)
+    existing_before = set(existing)  # GA4 이벤트 판단용 — append 전 상태 보존
     new_rows = [r for r in rows if f"{r[0]}|{r[1]}|{r[3]}|{r[4]}|{r[5]}" not in existing]
 
     # 기존 취소 상태 업데이트
@@ -196,6 +265,15 @@ def main():
         print(f"\n🎉 {len(new_rows)}건 추가! ({len(rows)-len(new_rows)}건 중복 스킵)")
     else:
         print("\n새로 추가할 데이터 없음.")
+
+    # GA4 Measurement Protocol — 결제수단 무관 서버사이드 구매 추적
+    ga4_mid, ga4_secret = _load_ga4_secrets()
+    if ga4_mid and ga4_secret:
+        ga4_events = build_ga4_events(orders, existing_before)
+        sent = sum(1 for oid, val, its in ga4_events if send_ga4_purchase_mp(oid, val, its, ga4_mid, ga4_secret))
+        print(f"📊 GA4 전송: {sent}/{len(ga4_events)}건")
+    else:
+        print("⚠️  GA4 secrets 없음 — Measurement Protocol 전송 스킵")
 
 if __name__ == "__main__":
     main()
