@@ -1455,7 +1455,7 @@ def update_meta_yesterday():
     return update_meta_for_date(yesterday)
 
 
-def _send_ga4_purchase_mp(order_id, value, items):
+def _send_ga4_purchase_mp(order_id, value, items, order_ts=None):
     """GA4 Measurement Protocol로 purchase 이벤트 서버사이드 전송.
     네이버페이 등 외부 결제는 nominical.co.kr 주문완료 페이지로 안 돌아오기 때문에
     클라이언트 gtag 스크립트가 실행될 기회 자체가 없음 — Cafe24 주문 데이터를
@@ -1468,6 +1468,23 @@ def _send_ga4_purchase_mp(order_id, value, items):
         api_secret      = st.secrets.get("ga4_api_secret", "")
         if not measurement_id or not api_secret:
             return False
+
+        # 주문 시각을 timestamp_micros로 전송 — 없으면 전송 시점 날짜로 기록되어
+        # 밀린 주문을 나중에 보내면 전부 엉뚱한 날짜에 집계되는 버그가 생김.
+        # GA4 MP는 72시간 이전 이벤트를 거부하므로 그보다 오래된 주문은 스킵.
+        ts_micros = None
+        if order_ts:
+            try:
+                from datetime import datetime as _dtt, timedelta as _tdd
+                _dt = _dtt.fromisoformat(str(order_ts).replace("Z", "+09:00"))
+                if _dt.tzinfo:
+                    _dt = _dt.replace(tzinfo=None)
+                if _dtt.now() - _dt > _tdd(hours=71):
+                    return "skip"
+                ts_micros = int(_dt.timestamp() * 1_000_000)
+            except Exception:
+                pass
+
         # order_id 기반 결정론적 client_id (같은 주문 재시도해도 동일 id 유지)
         import hashlib
         client_id = hashlib.md5(f"cafe24-{order_id}".encode()).hexdigest()[:16]
@@ -1485,6 +1502,8 @@ def _send_ga4_purchase_mp(order_id, value, items):
                 },
             }],
         }
+        if ts_micros:
+            payload["timestamp_micros"] = ts_micros
         resp = _requests.post(
             f"https://www.google-analytics.com/mp/collect?measurement_id={measurement_id}&api_secret={api_secret}",
             json=payload, timeout=10,
@@ -1620,7 +1639,7 @@ def update_cafe24_yesterday():
             # — 결제수단(네이버페이 등)과 무관하게 Cafe24 주문 데이터 기준으로 100% 추적
             if order_has_new and status != "취소" and order_total > 0:
                 ga4_events.append((order_id_c24 or f"{platform}-{order_date}-{len(ga4_events)}",
-                                    order_total, order_ga4_items))
+                                    order_total, order_ga4_items, order.get("order_date", "")))
 
         if new_rows:
             # 날짜순 정렬 후 append
@@ -1630,7 +1649,8 @@ def update_cafe24_yesterday():
             ws.append_rows([existing_raw[0]] + all_data, value_input_option="USER_ENTERED")
 
         # GA4에 구매 이벤트 서버사이드 전송 (네이버페이 등 외부결제도 100% 추적)
-        ga4_sent = sum(1 for oid, val, its in ga4_events if _send_ga4_purchase_mp(oid, val, its))
+        ga4_sent = sum(1 for oid, val, its, ots in ga4_events
+                       if _send_ga4_purchase_mp(oid, val, its, order_ts=ots) is True)
 
         return True, f"✅ Cafe24 {date_str} 완료 — {len(new_rows)}건 추가 (GA4 전송 {ga4_sent}/{len(ga4_events)})"
 
@@ -3528,6 +3548,25 @@ with tab5:
 <b>액션 아이템:</b> 리뷰 관리는 광고만큼 중요한 전환 요소 — 신상품 런칭 초기 리뷰 확보를 우선순위로.
 </div>""", unsafe_allow_html=True)
 
+        with st.expander("**7/9~7/12 — 장마 비수기 속 신상 쇼츠 회복**  \n상품기획 · 컨텐츠 · 이커머스", expanded=False):
+            chart_container("✅ 사례 4 — 쉬어 립스탑 쇼츠, 장마 비수기 판매 견인 (2026-07-09~12)", "패션 비수기(7월)에도 신상품 + 개인 계정 콘텐츠 조합으로 자사몰 판매 회복")
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: kpi_card("자사몰 주문", "13건", "4일간 (취소 제외)", True)
+            with c2: kpi_card("자사몰 실수익", "116만원", "7/9~7/12 합산", True)
+            with c3: kpi_card("방문자 피크", "297명", "7/12 — 기간 최고", True)
+            with c4: kpi_card("ROAS 피크", "854%", "7/10", True)
+            st.markdown("""<div style='background:#F0FAF5;border-left:4px solid #27AE60;border-radius:6px;padding:14px 18px;margin-top:10px;'>
+<b>무슨 일이 있었나</b><br>
+7월은 온라인 패션 거래가 연중 최저 수준으로 떨어지는 장마 비수기인데, 7/9부터 자사몰 판매가 뚜렷하게 회복됨.<br><br>
+① <b>신상품이 견인</b> — 쉬어 립스탑 투인원 러닝 쇼츠가 7월에만 13건 이상 판매되며 페이크 레이어드티와 함께 투톱 형성.
+기존 베스트(페이크레이어드)에만 의존하지 않고 신상이 매출 축을 추가함.<br>
+② <b>개인 계정 콘텐츠 유입</b> — 7/5 개인 계정 러닝크루 게시물(도달 2,017 · 좋아요 136 · 공유 4) 이후
+개인 인스타 경유 유입이 7/9 18명, 7/11 13명, 7/12 12명으로 상승. 방문자도 7/11 245명 → 7/12 297명으로 기간 최고 갱신.<br>
+③ <b>W컨셉 보부상백 반복 판매</b> — 7월에만 4건(7/3·7/7·7/8·7/10). 채널(W컨셉)과 카테고리(백)의 궁합이 검증됨.<br><br>
+<b>교훈:</b> 비수기는 광고 효율로 뚫는 게 아니라 <b>신상품 모멘텀 + 오가닉 콘텐츠</b>로 뚫는다.
+그리고 잘 팔리는 채널·카테고리 조합(W컨셉×백)은 해당 채널 전용 콘텐츠/노출 강화로 키울 것.
+</div>""", unsafe_allow_html=True)
+
     with col_bad:
         st.markdown("<div style='font-size:15px;font-weight:700;color:#E74C3C;margin-bottom:10px;'>⚠️ Bad Case</div>", unsafe_allow_html=True)
 
@@ -3543,6 +3582,24 @@ with tab5:
 ② 상세페이지 착용샷 부재 — 플랫레이만 있어 "레이어드 효과"가 전달 안 됨<br>
 ③ 상세 설명 텍스트 부족 — 89,000원 가격을 설득할 근거 부재<br><br>
 <b>교훈:</b> 콘텐츠가 잘 만들어졌어도 커머스 인프라(재고·상세페이지)가 준비 안 되면 전환은 0건이 된다.
+</div>""", unsafe_allow_html=True)
+
+        with st.expander("**7/1~7/8 — 전환 절벽 + 공식 계정 발행 공백**  \n컨텐츠 · 퍼포먼스 마케팅", expanded=False):
+            chart_container("⚠️ 사례 5 — 7월 첫째주 전환 절벽 (2026-07-01~08)", "소재 피로 + 공식 계정 3주 공백 + 장마 비수기 3중 악재")
+            c1, c2, c3 = st.columns(3)
+            with c1: kpi_card("GA4 전환 0건일", "4일", "7/1·7/6·7/7 등", False)
+            with c2: kpi_card("CTR 최저", "2.54%", "7/3 — 기준선 3% 붕괴", False)
+            with c3: kpi_card("공식 계정 공백", "25일+", "마지막 게시물 6/18", False)
+            st.markdown("""<div style='background:#FFF0F0;border-left:4px solid #E74C3C;border-radius:6px;padding:14px 18px;margin-top:14px;'>
+<b>원인 진단</b><br>
+① <b>소재 피로</b> — 6/21 투입 소재가 2주 경과. 노출이 급증한 날(7/3 4,401회 · 7/6 3,374회)마다 CTR이 2.5~2.7%로 반토막.
+Meta가 오디언스를 넓힐수록 반응이 떨어지는 전형적 피로 패턴.<br>
+② <b>공식 계정 발행 중단</b> — 6/18 이후 게시물 0. 공식 계정 경유 유입이 일 0~2명으로 소멸. 개인 계정 혼자 오가닉 유입을 지탱.<br>
+③ <b>장마 비수기</b> — 7~8월 온라인 패션 거래량은 성수기(11월) 대비 최대 36% 낮음. 외부 환경도 역풍.<br><br>
+<b>추가 발견 — 데이터 갭 주의:</b> GA4 전환 0으로 표시된 날에도 실제 주문은 존재했음
+(7/6 무신사 2건, 7/11 자사몰 3건 등). GA4는 자사몰 일부만 잡으므로 <b>"오늘 판매 0"의 판단은 반드시 플랫폼 매출 시트 기준</b>으로 할 것.<br><br>
+<b>교훈:</b> 소재 수명(3~6일 피크, 10일 내 교체)을 넘긴 채 비수기에 진입하면 하락이 증폭된다.
+비수기일수록 ① 소재를 더 자주 교체하고 ② 공식 계정 발행 리듬(주 2회 이상)을 유지해 오가닉 바닥을 지켜야 한다.
 </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)

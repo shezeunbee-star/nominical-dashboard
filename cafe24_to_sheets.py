@@ -179,10 +179,27 @@ def _load_ga4_secrets():
     sec = re.search(r'ga4_api_secret\s*=\s*["\']([^"\']+)["\']', content)
     return (mid.group(1) if mid else None), (sec.group(1) if sec else None)
 
-def send_ga4_purchase_mp(order_id, value, items, measurement_id, api_secret):
+def send_ga4_purchase_mp(order_id, value, items, measurement_id, api_secret, order_ts=None):
     """결제수단(네이버페이 등 외부결제 포함)과 무관하게 Cafe24 주문 데이터를
-    기준으로 GA4에 구매 이벤트를 직접 전송 (클라이언트 gtag 의존 안 함)."""
+    기준으로 GA4에 구매 이벤트를 직접 전송 (클라이언트 gtag 의존 안 함).
+
+    order_ts: 주문 시각 ISO 문자열. timestamp_micros로 전송해 실제 주문일에 기록.
+    GA4 MP는 72시간 이전 이벤트를 거부하므로, 그보다 오래된 주문은 전송하지 않고
+    "skip"을 반환 (전송 시점 날짜로 잘못 기록되는 것 방지)."""
     try:
+        ts_micros = None
+        if order_ts:
+            try:
+                dt = datetime.fromisoformat(str(order_ts).replace("Z", "+09:00"))
+                if dt.tzinfo:
+                    dt = dt.replace(tzinfo=None)  # KST 로컬 기준
+                age = datetime.now() - dt
+                if age > timedelta(hours=71):
+                    return "skip"
+                ts_micros = int(dt.timestamp() * 1_000_000)
+            except Exception:
+                pass
+
         client_id = hashlib.md5(f"cafe24-{order_id}".encode()).hexdigest()[:16]
         client_id = f"{client_id[:8]}.{client_id[8:]}"
         payload = {
@@ -197,6 +214,8 @@ def send_ga4_purchase_mp(order_id, value, items, measurement_id, api_secret):
                 },
             }],
         }
+        if ts_micros:
+            payload["timestamp_micros"] = ts_micros
         resp = requests.post(
             f"https://www.google-analytics.com/mp/collect?measurement_id={measurement_id}&api_secret={api_secret}",
             json=payload, timeout=10,
@@ -233,7 +252,8 @@ def build_ga4_events(orders, existing_keys_before):
             if key not in existing_keys_before:
                 has_new = True
         if has_new and status != "취소" and total > 0:
-            events.append((order_id or f"{platform}-{order_date}-{len(events)}", total, ga4_items))
+            events.append((order_id or f"{platform}-{order_date}-{len(events)}",
+                           total, ga4_items, order.get("order_date", "")))
     return events
 
 # ── 메인 ─────────────────────────────────────────────────────────
@@ -270,8 +290,17 @@ def main():
     ga4_mid, ga4_secret = _load_ga4_secrets()
     if ga4_mid and ga4_secret:
         ga4_events = build_ga4_events(orders, existing_before)
-        sent = sum(1 for oid, val, its in ga4_events if send_ga4_purchase_mp(oid, val, its, ga4_mid, ga4_secret))
-        print(f"📊 GA4 전송: {sent}/{len(ga4_events)}건")
+        sent = skipped = 0
+        for oid, val, its, ots in ga4_events:
+            r = send_ga4_purchase_mp(oid, val, its, ga4_mid, ga4_secret, order_ts=ots)
+            if r == "skip":
+                skipped += 1
+            elif r:
+                sent += 1
+        msg = f"📊 GA4 전송: {sent}/{len(ga4_events)}건"
+        if skipped:
+            msg += f" (72시간 초과 {skipped}건 스킵 — GA4가 과거 이벤트를 받지 않음)"
+        print(msg)
     else:
         print("⚠️  GA4 secrets 없음 — Measurement Protocol 전송 스킵")
 
