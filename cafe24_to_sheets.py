@@ -258,8 +258,10 @@ def build_ga4_events(orders, existing_keys_before):
 
 # ── 메인 ─────────────────────────────────────────────────────────
 def main():
+    # end 기본값 = 어제. 오늘(마감 안 된 날)을 수집하면 부분 데이터가 먼저 들어가고,
+    # 이후 같은 날 동일 상품·컬러·사이즈 주문이 중복으로 오인되어 누락되는 문제 발생.
     start = sys.argv[1] if len(sys.argv) > 1 else (datetime.now()-timedelta(days=30)).strftime("%Y-%m-%d")
-    end   = sys.argv[2] if len(sys.argv) > 2 else datetime.now().strftime("%Y-%m-%d")
+    end   = sys.argv[2] if len(sys.argv) > 2 else (datetime.now()-timedelta(days=1)).strftime("%Y-%m-%d")
     print(f"🛒 Cafe24 주문 수집: {start} ~ {end}")
 
     token  = get_token()
