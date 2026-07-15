@@ -110,6 +110,16 @@ def parse_option(opt_str):
         color = m_color.group(1).strip()
     if m_size:
         size = m_size.group(1).strip()
+    # 무신사 등 마켓 주문: '옵션1=차콜, 옵션2=M' 형식 (순서는 상품마다 다름 —
+    # 플리츠는 옵션1=사이즈, 페이크레이어드는 옵션1=컬러) → 값을 보고 판별
+    if color == "-" and size == "-":
+        SIZE_PAT = re.compile(r'^(XXS|XS|S|M|L|XL|XXL|2XL|3XL|FREE|\d{2,3})$', re.I)
+        for m in re.finditer(r'옵션\d+=([^,]+)', s):
+            val = m.group(1).strip()
+            if SIZE_PAT.match(val):
+                size = val
+            else:
+                color = val
     # 색상/사이즈 태그 없이 단순 '블랙/M' 형태면
     if color == "-" and size == "-" and "/" in s:
         parts = s.split("/", 1)

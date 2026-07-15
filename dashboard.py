@@ -1621,6 +1621,15 @@ def update_cafe24_yesterday():
                 size  = _re.search(r'사이즈=([^,)]+)', opt)
                 color = color.group(1).strip() if color else "-"
                 size  = size.group(1).strip()  if size  else "-"
+                # 무신사 등 마켓 주문: '옵션1=차콜, 옵션2=M' 형식 (순서 상품마다 다름)
+                if color == "-" and size == "-":
+                    _SIZE_PAT = _re.compile(r'^(XXS|XS|S|M|L|XL|XXL|2XL|3XL|FREE|\d{2,3})$', _re.I)
+                    for _m in _re.finditer(r'옵션\d+=([^,]+)', opt):
+                        _val = _m.group(1).strip()
+                        if _SIZE_PAT.match(_val):
+                            size = _val
+                        else:
+                            color = _val
                 qty   = int(float(item.get("quantity", 1) or 1))
                 price = int(float(item.get("product_price", 0) or 0))
                 total = price * qty
