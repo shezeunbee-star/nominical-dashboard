@@ -185,6 +185,12 @@ def parse_wconcept(filepath):
         if not row[i_name]: continue
         color  = str(row[i_color]) if row[i_color] else "-"
         size   = str(row[i_size])  if row[i_size]  else "-"
+        # 옵션이 한 칸에 합쳐진 경우 ("레몬 옐로우 S") — 마지막 토큰이 사이즈 패턴이면 분리
+        if size == "-" and color != "-":
+            _parts = color.split()
+            if len(_parts) >= 2 and re.match(r'^(XXS|XS|S|M|L|XL|XXL|2XL|3XL|FREE|\d{2,3})$', _parts[-1], re.I):
+                size = _parts[-1]
+                color = " ".join(_parts[:-1])
         try:
             qty = int(row[i_qty]) if row[i_qty] else 1
         except (ValueError, TypeError):
