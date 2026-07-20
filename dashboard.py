@@ -3782,8 +3782,7 @@ with tab6:
             {_td3(r['컬러'], 'center')}
             {_td3(r['사이즈'], 'center')}
             {_td3(f"{int(r['기준재고']):,}")}
-            {_td3(f"{int(r['판매수량(기준일 이후)']):,}")}
-            {_period_td}
+            {_td3(f"{int(r['판매수량(기준일 이후)']):,}")}{_period_td}
             <td style='padding:7px 10px;font-size:13px;font-weight:700;color:{_color};border-bottom:1px solid #F0F0F0;text-align:right;'>{int(r['재고']):,}</td>
             {_td3(f"{r['일평균판매']:.1f}개")}
             {_td3(f"{r['소진예상일']}일" if pd.notna(r['소진예상일']) else '-', 'center')}
