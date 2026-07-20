@@ -333,12 +333,57 @@ def parse_cafe24(filepath):
     return rows
 # ── 플랫폼 감지 ─────────────────────────────────────────────────
 
+def parse_coupang(filepath):
+    """쿠팡 DeliveryList(날짜)_(N).xlsx — 수수료 11.55% (VAT 포함)
+    [9]주문일 [10]등록상품명 [11]등록옵션명("그린 L") [16]업체상품코드 [22]구매수 [23]옵션판매가"""
+    COMMISSION_COUPANG = 11.55
+    print(f"  📦 쿠팡 파싱: {os.path.basename(filepath)}")
+    wb = openpyxl.load_workbook(filepath)
+    ws_f = wb.active
+    all_rows = list(ws_f.iter_rows(values_only=True))
+    if not all_rows:
+        return []
+    header = all_rows[0]
+    i_date  = find_col(header, "주문일") or 9
+    i_prod  = find_col(header, "등록상품명") or 10
+    i_opt   = find_col(header, "등록옵션명") or 11
+    i_code  = find_col(header, "업체상품코드") or 16
+    i_qty   = find_col(header, "구매수(수량)", "구매수") or 22
+    i_price = find_col(header, "옵션판매가(판매단가)", "옵션판매가") or 23
+    SIZE_PAT = re.compile(r'^(XXS|XS|S|M|L|XL|XXL|2XL|3XL|FREE|\d{2,3})$', re.I)
+    rows = []
+    for i, row in enumerate(all_rows):
+        if i == 0 or not row[i_prod]:
+            continue
+        # 옵션 "그린 L" → 컬러/사이즈 분리 (마지막 토큰이 사이즈 패턴이면 사이즈)
+        color, size = "-", "-"
+        opt = str(row[i_opt] or "").strip()
+        if opt:
+            parts = opt.split()
+            if parts and SIZE_PAT.match(parts[-1]):
+                size = parts[-1]
+                color = " ".join(parts[:-1]) or "-"
+            else:
+                color = opt
+        qty    = int(row[i_qty]) if row[i_qty] else 1
+        price  = int(float(row[i_price])) if row[i_price] else 0
+        total  = price * qty
+        profit = round(total * (1 - COMMISSION_COUPANG / 100))
+        rows.append([
+            "쿠팡", fmt_date(row[i_date]),
+            str(row[i_prod]), str(row[i_code] or "-"),
+            color, size, qty, total,
+            COMMISSION_COUPANG, profit, "결제완료"
+        ])
+    return rows
+
 def detect_platform(filepath):
     name = os.path.basename(filepath).lower()
     if "29cm" in name:        return "29cm"
     if "상품준비중" in name:   return "wconcept"
     if "배송조회" in name:     return "ssf"
     if "발송처리목록" in name: return "sivillage"
+    if "deliverylist" in name: return "coupang"
     if "주문내역" in name:       return "cafe24"
     if "결제완료내역" in name:    return "cafe24"
     return None
@@ -360,6 +405,7 @@ def main(files):
         elif platform == "wconcept":   rows = parse_wconcept(filepath)
         elif platform == "ssf":        rows = parse_ssf(filepath)
         elif platform == "sivillage":  rows = parse_sivillage(filepath)
+        elif platform == "coupang":    rows = parse_coupang(filepath)
         elif platform == "cafe24":       rows = parse_cafe24(filepath)
         else:
             rows = []
