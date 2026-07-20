@@ -4,6 +4,11 @@ Cafe24 주문 → 구글 시트 자동 정리
   예시: python3 cafe24_to_sheets.py 2026-05-01 2026-05-26
   날짜 생략 시 오늘 기준 최근 30일
 """
+# ── 자동실행 안전장치: 잠자기 등으로 네트워크가 멈춰도 30분 후 자동 종료 ──
+import signal as _signal, socket as _socket
+_signal.alarm(1800)
+_socket.setdefaulttimeout(120)
+
 import sys, os, json, requests, base64, re, gspread, hashlib
 from datetime import datetime, timedelta
 from google.oauth2.credentials import Credentials
