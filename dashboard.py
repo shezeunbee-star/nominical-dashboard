@@ -777,11 +777,14 @@ def _normalize_color(c):
     return synonyms.get(c, c)
 
 @st.cache_data(ttl=300)
-def load_inventory_data():
+def load_inventory_data(sales_from=None, sales_to=None):
     """입고관리 시트(품번/매칭키워드/컬러/사이즈/기준재고/기준일자) + 플랫폼
     매출 시트를 매칭해서 현재 재고를 계산.
     기준일자 이후 발생한 판매(취소·반품 제외)만 기준재고에서 차감함
-    — 기준재고 자체가 그 시점까지의 판매를 이미 반영한 스냅샷이기 때문."""
+    — 기준재고 자체가 그 시점까지의 판매를 이미 반영한 스냅샷이기 때문.
+
+    sales_from/sales_to (YYYY-MM-DD 문자열): 지정 시 '기간판매' 컬럼에
+    해당 기간 판매량을 집계 (재고 차감과는 무관한 조회용)."""
     SCOPES = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
@@ -837,6 +840,7 @@ def load_inventory_data():
     if df_plat.empty:
         for r in inv_rows:
             r["판매수량(기준일 이후)"] = 0
+            r["기간판매"] = 0
             r["매칭건수"] = 0
             r["최근7일판매"] = 0
             r["최근3일판매"] = 0
@@ -857,6 +861,7 @@ def load_inventory_data():
             m = m[m["_컬러norm"] == color_norm]
             if size and size != "-":
                 m = m[m["사이즈"].astype(str).str.strip() == size]
+            m_all = m  # 기준일 컷오프 적용 전 — 기간판매 집계용
             try:
                 cutoff = pd.Timestamp(r["기준일자"]) if r["기준일자"] else None
             except Exception:
@@ -866,6 +871,16 @@ def load_inventory_data():
 
             r["판매수량(기준일 이후)"] = int(m["수량"].sum())
             r["매칭건수"] = len(m)
+
+            # 선택 기간 판매량 (재고 차감과 무관한 조회용)
+            if sales_from and "주문일_dt" in m_all.columns:
+                _pf = pd.Timestamp(sales_from)
+                _pt = pd.Timestamp(sales_to) if sales_to else pd.Timestamp.now()
+                mp = m_all[(m_all["주문일_dt"] >= _pf)
+                           & (m_all["주문일_dt"] < _pt + pd.Timedelta(days=1))]
+                r["기간판매"] = int(mp["수량"].sum())
+            else:
+                r["기간판매"] = r["판매수량(기준일 이후)"]
 
             # 최근 3일/7일 평균 일판매량 — 둘 중 더 빠른(위험한) 쪽을 리오더 판단에 사용
             # (7일 평균만 쓰면 최근 며칠 급증한 판매 속도가 희석되어 늦게 잡힘)
@@ -3668,7 +3683,33 @@ with tab6:
         "차감해서 현재 재고를 계산합니다. (현재 26SS 4개 스타일만 색상·사이즈 단위로 추적 중)"
     )
 
-    df_inv = load_inventory_data()
+    # ── 판매 집계 기간 필터 ───────────────────────────────────────
+    from datetime import date as _date, timedelta as _timedelta
+    _pf_col1, _pf_col2, _ = st.columns([2, 3, 3])
+    with _pf_col1:
+        _inv_period = st.selectbox(
+            "판매 집계 기간",
+            ["전체 (기준일 이후)", "최근 7일", "최근 14일", "최근 30일", "직접 선택"],
+            key="inv_period_sel",
+        )
+    _sales_from = _sales_to = None
+    if _inv_period == "직접 선택":
+        with _pf_col2:
+            _rng = st.date_input(
+                "조회 기간", value=(_date.today() - _timedelta(days=13), _date.today()),
+                key="inv_period_range",
+            )
+        if isinstance(_rng, (list, tuple)) and len(_rng) == 2:
+            _sales_from, _sales_to = _rng[0].isoformat(), _rng[1].isoformat()
+    elif _inv_period != "전체 (기준일 이후)":
+        _n = int(_inv_period.replace("최근 ", "").replace("일", ""))
+        _sales_from = (_date.today() - _timedelta(days=_n - 1)).isoformat()
+        _sales_to = _date.today().isoformat()
+
+    _period_active = _sales_from is not None
+    _sold_label = _inv_period if _period_active else "기준일 이후 판매"
+
+    df_inv = load_inventory_data(_sales_from, _sales_to)
 
     if df_inv.empty:
         st.info("📦 입고관리 시트에 데이터가 없어요. 구글 시트에서 직접 기준재고를 입력해 주세요.")
@@ -3676,14 +3717,14 @@ with tab6:
 
     # ── KPI 요약 ──────────────────────────────────────────────────
     total_baseline = int(df_inv["기준재고"].sum())
-    total_sold     = int(df_inv["판매수량(기준일 이후)"].sum())
+    total_sold     = int(df_inv["기간판매"].sum()) if _period_active else int(df_inv["판매수량(기준일 이후)"].sum())
     total_stock    = int(df_inv["재고"].sum())
     out_of_stock   = len(df_inv[(df_inv["기준재고"] > 0) & (df_inv["재고"] <= 0)])
     low_stock      = len(df_inv[(df_inv["재고"] > 0) & (df_inv["재고"] <= 5)])
 
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1: kpi_card("기준재고 합계", f"{total_baseline:,}개")
-    with k2: kpi_card("기준일 이후 판매", f"{total_sold:,}개")
+    with k2: kpi_card(f"판매 ({_sold_label})" if _period_active else "기준일 이후 판매", f"{total_sold:,}개")
     with k3: kpi_card("현재 재고", f"{total_stock:,}개")
     with k4: kpi_card("품절", f"{out_of_stock}개", "재고 0 이하", out_of_stock == 0)
     with k5: kpi_card("재고 부족(5개 이하)", f"{low_stock}개", "", low_stock == 0)
@@ -3734,6 +3775,7 @@ with tab6:
     _rows_html3 = ""
     for _, r in _df_sorted.iterrows():
         _color = _stock_badge(r["재고"])
+        _period_td = _td3(f"<b>{int(r['기간판매']):,}</b>") if _period_active else ""
         _rows_html3 += f"""<tr>
             {_td3(r['품번'], 'left')}
             {_td3(r['상품명'], 'left')}
@@ -3741,6 +3783,7 @@ with tab6:
             {_td3(r['사이즈'], 'center')}
             {_td3(f"{int(r['기준재고']):,}")}
             {_td3(f"{int(r['판매수량(기준일 이후)']):,}")}
+            {_period_td}
             <td style='padding:7px 10px;font-size:13px;font-weight:700;color:{_color};border-bottom:1px solid #F0F0F0;text-align:right;'>{int(r['재고']):,}</td>
             {_td3(f"{r['일평균판매']:.1f}개")}
             {_td3(f"{r['소진예상일']}일" if pd.notna(r['소진예상일']) else '-', 'center')}
@@ -3748,11 +3791,12 @@ with tab6:
             {_td3(r['비고'] or '-', 'left')}
         </tr>"""
 
+    _period_th = _th3(f"판매({_sold_label})") if _period_active else ""
     st.markdown(f"""
     <div style='overflow-x:auto;'>
     <table style='width:100%;border-collapse:collapse;'>
         <thead><tr>
-            {_th3('품번')}{_th3('상품명(Cafe24)')}{_th3('컬러')}{_th3('사이즈')}{_th3('기준재고')}{_th3('판매(기준일후)')}{_th3('현재재고')}{_th3('일평균판매(7일)')}{_th3('소진예상일')}{_th3('매칭건수')}{_th3('비고')}
+            {_th3('품번')}{_th3('상품명(Cafe24)')}{_th3('컬러')}{_th3('사이즈')}{_th3('기준재고')}{_th3('판매(기준일후)')}{_period_th}{_th3('현재재고')}{_th3('일평균판매(7일)')}{_th3('소진예상일')}{_th3('매칭건수')}{_th3('비고')}
         </tr></thead>
         <tbody>{_rows_html3}</tbody>
     </table></div>
