@@ -1725,6 +1725,39 @@ with col_refresh:
         st.cache_data.clear()
         st.rerun()
 
+# ── 데이터 신선도 경고 배너 — 자동 수집이 멈추면 여기서 바로 보임 ──
+def _staleness_banner():
+    from datetime import date as _d, timedelta as _td
+    try:
+        issues = []
+        yesterday = _d.today() - _td(days=1)
+
+        # GA4/Meta: 일별 트래킹 마지막 날짜 행
+        if not df_all.empty and "날짜_dt" in df_all.columns:
+            last_daily = df_all["날짜_dt"].max().date()
+            gap = (yesterday - last_daily).days
+            if gap >= 1:
+                issues.append(f"📊 방문자·광고 데이터가 {last_daily.month}/{last_daily.day}까지만 있어요 ({gap}일 밀림)")
+
+        # Cafe24: 플랫폼 매출 시트의 Cafe24 마지막 주문일
+        if not df_platform_all.empty and "주문일_dt" in df_platform_all.columns:
+            _c24 = df_platform_all[df_platform_all["플랫폼"] == "Cafe24"]
+            if not _c24.empty:
+                last_c24 = _c24["주문일_dt"].max().date()
+                gap2 = (yesterday - last_c24).days
+                if gap2 >= 3:  # 자사몰 주문이 3일 이상 없는 건 수집 중단 의심
+                    issues.append(f"🏬 자사몰 주문 수집이 {last_c24.month}/{last_c24.day}에 멈춰 있어요 ({gap2}일 밀림)")
+
+        if issues:
+            st.warning(
+                "**⚠️ 자동 수집 확인 필요** — " + " / ".join(issues) +
+                "  → 🔄 새로고침 버튼을 누르면 밀린 데이터를 당겨와요."
+            )
+    except Exception:
+        pass
+
+_staleness_banner()
+
 st.markdown("---")
 
 # ── 탭 분기 ──────────────────────────────────────────────────────
