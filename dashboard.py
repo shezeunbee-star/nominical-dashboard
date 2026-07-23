@@ -1772,9 +1772,9 @@ _staleness_banner()
 st.markdown("---")
 
 # ── 탭 분기 ──────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 방문자 · 광고 성과", "🏬 플랫폼별 매출", "📅 기간별 매출 조회",
-    "📱 인스타그램 콘텐츠", "📖 플레이북", "📦 입고·재고",
+    "📱 인스타그램 콘텐츠", "📖 플레이북", "📦 입고·재고", "🎬 26FW 콘텐츠보드",
 ])
 
 
@@ -3863,6 +3863,259 @@ with tab6:
         "⚠️ 매칭건수가 0이거나 비정상적으로 많으면 색상/사이즈 표기 차이일 수 있어요. "
         "'📦 입고관리' 시트에서 매칭키워드·컬러·사이즈를 직접 수정해 보정할 수 있습니다."
     )
+
+
+# ════════════════════════════════════════════════════════════════
+# TAB 7: 26FW 콘텐츠보드 (상품×채널×퍼널 통합보드 + SNS 필승 플레이북)
+# ════════════════════════════════════════════════════════════════
+with tab7:
+    _AC = "#AC4A28"   # 테라코타 (26FW SEOUL EPICS 아이덴티티)
+    _SG = "#6C7161"   # 세이지
+
+    st.markdown(f"""
+<div style='padding:6px 0 2px;'>
+  <div style='font-family:monospace;font-size:11px;letter-spacing:0.2em;color:{_SG};text-transform:uppercase;'>NOMINICAL · 26FW SEOUL EPICS</div>
+  <div style='font-size:26px;font-weight:800;letter-spacing:-0.02em;margin-top:6px;'>상품 × 채널 × 퍼널 <span style='color:{_AC};'>통합보드</span></div>
+  <div style='color:#8C8C8C;font-size:13px;margin-top:6px;max-width:46rem;'>
+    네 상품이 여섯 접객 채널에서 각각 어떤 퍼널 단계 장치를 쓰는지 한 판으로.
+    채널마다 힘을 싣는 단계가 달라 해당 없는 조합은 대시(—)로 비워둠.</div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── 통합보드 데이터 ──────────────────────────────────────────
+    _STAGES = ["01 인지", "02 공감", "03 신뢰(관계)", "04 탐색(유입)", "05 전환", "06 재구매"]
+    _CHANNELS = ["개인 인스타", "공식 인스타", "자사몰 배너", "자사몰 프로모션", "유튜브 롱폼", "네이버/구글"]
+
+    _BOARD = [
+        {"name": "쉬어<br>경량패딩",
+         "spec": [("USP1","세탁기 세탁 가능"),("USP2","반투명 립스탑 겉감"),("USP3","운동 후 그대로 카페"),
+                  ("소재","신슐레이트+쉬어 립스탑"),("가격","생산단가 7만원"),("컬러","2컬러"),
+                  ("납기","샘플 확정 후 약 2개월"),("비고","첫 패딩, 판매 데이터 없음")],
+         "rows": {
+            "개인 인스타":    ["일상 착용 브이로그","\"땀 많은데 패딩 부담\" 토로","직접 세탁해보는 모습","—","—","—"],
+            "공식 인스타":    ["\"패딩 자주 빨면 죽는다는 착각\"","세탁 스트레스 공감 훅","세탁 전후 배플 비교 REVEAL","하이라이트에 소재 설명","여유형 엔딩+링크","세탁 후기 리그램 요청"],
+            "자사몰 배너":    ["—","—","배플 클로즈업 이미지","\"땀 흘리는 날엔 망설여집니다\"","바로구매 CTA","—"],
+            "자사몰 프로모션": ["—","—","—","신제품 첫 공개 배지","초도 물량 한정 안내","세탁 내구성 재확인 쿠폰"],
+            "유튜브 롱폼":    ["경량패딩 트렌드 브랜드필름","\"다운 패딩 세탁 고민\" 도입","공장 신슐레이트 제작 비하인드","배플 사이즈 설명 자막","—","—"],
+            "네이버/구글":    ["—","—","—","\"세탁 가능 경량패딩\" SEO","브랜드+제품명 검색광고","—"],
+         }},
+        {"name": "AeroZest<br>바람막이",
+         "spec": [("USP1","핑거홀"),("USP2","투웨이 지퍼"),("USP3","구김없는 와샤가공"),
+                  ("소재","와샤가공 원단"),("가격","생산단가 5만원"),("컬러","2컬러 + 사이즈 추가"),
+                  ("납기","샘플 확정 후 약 2개월"),("비고","작년 120장 2년 완판 검증")],
+         "rows": {
+            "개인 인스타":    ["관악산→한강 카페 브이로그","\"바스락 바람막이 답답함\" 토로","데일리 착용 자연 노출","—","—","—"],
+            "공식 인스타":    ["\"바람막이는 3km부터 짐\" 패턴인터럽트","크롭 실루엣 우아함 어필","작년 완판 데이터 언급","핑거홀·지퍼 클로즈업","최우선 발행, 모멘텀 선점","사이즈 추가 소식 재노출"],
+            "자사몰 배너":    ["—","—","완판 이력 뱃지","\"3km부터 짐이 됩니다\"","즉시구매 CTA","—"],
+            "자사몰 프로모션": ["—","—","—","시즌 오프너 상품 배지","48시간 한정 리마인드","재구매 쿠폰"],
+            "유튜브 롱폼":    ["서울 러너 다큐 브랜드필름","간절기 옷 고민 스토리텔링","원단·핏 개발 비하인드","투웨이 지퍼 활용 설명","—","—"],
+            "네이버/구글":    ["—","—","—","\"크롭 바람막이\" SEO","브랜드+제품명 검색광고","—"],
+         }},
+        {"name": "러닝 비니",
+         "spec": [("USP1","울혼방 항균"),("USP2","스타일리시 핏"),("USP3","세탁 가능"),
+                  ("소재","울 혼방"),("가격","생산단가 1.2만원"),("컬러","3컬러"),
+                  ("납기","국내생산, 리드타임 짧음"),("비고","안전 카드, MOQ 낮음")],
+         "rows": {
+            "개인 인스타":    ["러닝 후 비니 착용 일상샷","\"콘돔핏 놀림당함\" 토로","핏 비교 직접 착용","—","—","—"],
+            "공식 인스타":    ["\"얇은 러닝비니 두상 노출, 저만이에요?\"","기능성=스타일 포기 통념 반박","기능성 비니 vs 노미니컬 핏 대비","항균·세탁 기능 3단어 자막","부담없는 즉시 오픈","코디샷 리그램"],
+            "자사몰 배너":    ["—","—","—","핏 클로즈업 이미지","세트 구매 유도","—"],
+            "자사몰 프로모션": ["—","—","—","—","패딩·바람막이 번들 구성","시즌 코디 제안 알림"],
+            "유튜브 롱폼":    ["—","—","—","—","—","—"],
+            "네이버/구글":    ["—","—","—","\"러닝 비니 핏\" SEO","저관여 상품, 검색광고 최소","—"],
+         }},
+        {"name": "Better<br>Stripe 티셔츠",
+         "spec": [("USP1","코튼터치 기능성 원단"),("USP2","레드 잔줄 스트라이프"),("USP3","여름~가을 시즌 브릿지"),
+                  ("소재","코튼터치 기능성 폴리"),("가격","생산단가 1.5만원"),("컬러","5컬러"),
+                  ("납기","국내생산, 리드타임 짧음"),("비고","안전 카드, 약 160장")],
+         "rows": {
+            "개인 인스타":    ["여름 훈련 데일리 착용샷","\"러닝복 스트라이프 없어서 아쉬움\"","땀 배출 체감 후기","—","—","—"],
+            "공식 인스타":    ["\"스트라이프 좋아하는데 러닝복은 민무늬\" 콜아웃","패턴 공백 자체가 갈등","교육형: 왜 패턴 러닝복이 드문가","냉감 소재 클로즈업","부담없는 즉시 오픈","레이어드 스타일링 후기"],
+            "자사몰 배너":    ["—","—","—","\"스트라이프 티는 많은데 다 면\" 문구","즉시구매 CTA","—"],
+            "자사몰 프로모션": ["—","—","—","—","시즌 브릿지 세일 (8~10월)","가을 대회 시즌 재노출"],
+            "유튜브 롱폼":    ["—","—","—","—","—","—"],
+            "네이버/구글":    ["—","—","—","\"스트라이프 러닝 티셔츠\" SEO","저관여 상품, 검색광고 최소","—"],
+         }},
+    ]
+
+    # ── 테이블 HTML 생성 ─────────────────────────────────────────
+    _na = f"<span style='color:#C8C8C8;font-family:monospace;'>—</span>"
+    def _cell(v):
+        if v == "—":
+            return f"<td style='padding:8px 9px;border-bottom:1px solid #F0EFEA;border-left:1px solid #F0EFEA;text-align:center;vertical-align:top;'>{_na}</td>"
+        return (f"<td style='padding:8px 9px;border-bottom:1px solid #F0EFEA;border-left:1px solid #F0EFEA;"
+                f"vertical-align:top;font-size:12px;line-height:1.4;'>{v}</td>")
+
+    _head = (f"<th style='padding:9px 10px;background:#F1F2EE;border-bottom:1px solid #DEDDD6;text-align:left;"
+             f"font-size:11px;color:#565A4F;'>상품 스펙</th>"
+             f"<th style='padding:9px 10px;background:#F1F2EE;border-bottom:1px solid #DEDDD6;text-align:left;'></th>"
+             f"<th style='padding:9px 10px;background:#F1F2EE;border-bottom:1px solid #DEDDD6;text-align:left;"
+             f"font-size:11px;color:{_SG};'>접객 채널</th>")
+    for s in _STAGES:
+        _num, _lbl = s.split(" ", 1)
+        _head += (f"<th style='padding:9px 10px;background:#F1F2EE;border-bottom:1px solid #DEDDD6;text-align:left;"
+                  f"font-size:12px;color:{_AC};font-weight:700;white-space:nowrap;'>"
+                  f"<span style='font-family:monospace;font-size:10px;color:{_SG};display:block;'>{_num}</span>{_lbl}</th>")
+
+    _body = ""
+    for _pi, _p in enumerate(_BOARD):
+        _spec_html = "".join(
+            f"<div style='padding:4px 0;border-bottom:1px solid #EAE9E3;font-size:11.5px;color:#565A4F;'>"
+            f"<b style='color:#1B1C18;display:inline-block;min-width:2.6rem;'>{k}</b> {v}</div>"
+            for k,v in _p["spec"])
+        _top_border = "border-top:2px solid #DEDDD6;" if _pi > 0 else ""
+        for _ci, _ch in enumerate(_CHANNELS):
+            _body += "<tr>"
+            if _ci == 0:
+                _body += (f"<th rowspan='6' style='padding:9px 10px;background:#F5F5F1;{_top_border}"
+                          f"font-size:14px;font-weight:750;vertical-align:top;text-align:left;border-bottom:1px solid #DEDDD6;'>{_p['name']}</th>")
+                _body += (f"<td rowspan='6' style='padding:9px 10px;background:#F5F5F1;{_top_border}"
+                          f"vertical-align:top;border-bottom:1px solid #DEDDD6;min-width:200px;'>{_spec_html}</td>")
+            _ch_border = _top_border if _ci == 0 else ""
+            _body += (f"<td style='padding:8px 9px;background:{_SG}22;border-bottom:1px solid #F0EFEA;{_ch_border}"
+                      f"font-size:12px;font-weight:700;white-space:nowrap;vertical-align:top;'>{_ch}</td>")
+            for _si, _val in enumerate(_p["rows"][_ch]):
+                if _ci == 0 and _si == 0:
+                    _body += _cell(_val).replace("border-bottom:1px solid #F0EFEA;", f"border-bottom:1px solid #F0EFEA;{_top_border}")
+                else:
+                    _body += _cell(_val)
+            _body += "</tr>"
+
+    st.markdown(f"""
+<div style='overflow-x:auto;border:1px solid #DEDDD6;border-radius:3px;margin-top:16px;'>
+<table style='border-collapse:collapse;width:100%;min-width:1400px;'>
+<thead><tr>{_head}</tr></thead>
+<tbody>{_body}</tbody>
+</table></div>
+<div style='display:flex;gap:20px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:#8C8C8C;'>
+  <span><b style='color:#1B1C18;'>—</b> 그 채널에서 그 단계가 주력이 아니라 비워둠</span>
+  <span><b style='color:#1B1C18;'>발행 순서</b> 바람막이 → 패딩 → 비니 → 티셔츠</span>
+</div>
+<div style='background:{_AC}1A;border:1px solid #DEDDD6;border-radius:2px;padding:14px 16px;margin-top:16px;font-size:13px;'>
+  <b style='color:{_AC};'>채널별 톤 원칙</b> — 개인 인스타는 판매 없이 삶으로, 공식 인스타는 훅부터 전환까지 전 구간 커버,
+  자사몰은 팩트와 인과로, 유튜브는 인지·신뢰 구간에 집중, 검색은 탐색·전환에만 쓴다.
+</div>
+""", unsafe_allow_html=True)
+
+    # ── SNS 필승 플레이북 ────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(f"""
+<div style='border-top:2px solid #DEDDD6;padding-top:20px;'>
+  <div style='font-family:monospace;font-size:11px;letter-spacing:0.18em;color:{_AC};text-transform:uppercase;'>SNS PLAYBOOK / v1</div>
+  <div style='font-size:22px;font-weight:800;letter-spacing:-0.02em;margin-top:6px;'>바이럴은 감이 아니라 <span style='color:{_AC};'>공식</span>이었다</div>
+  <div style='color:#8C8C8C;font-size:13px;margin-top:6px;'>CTR 8.7%를 만든 구조부터 훅·엔딩·상세페이지 첫 문장까지 — 반복해서 먹히는 이유를 한 장에.</div>
+</div>
+""", unsafe_allow_html=True)
+
+    with st.expander("① 모든 콘텐츠의 기본기 3원칙", expanded=True):
+        st.markdown(f"""
+<div style='font-size:13px;line-height:1.7;'>
+공식보다 먼저 깔려 있어야 하는 뼈대. 제목·첫 멘트·엔딩 셋이 안 잡히면 어떤 공식도 안 먹혀요.<br><br>
+<b style='color:{_AC};'>01 강력한 제목</b> — 주제를 담으면서 스크롤을 멈추게. 예쁜 말보다 멈추게 하는 말<br>
+<b style='color:{_AC};'>02 후킹하는 첫 멘트</b> — 첫 줄에서 "계속 봐야겠다". 설명 말고 공감 or 반전으로 시작<br>
+<b style='color:{_AC};'>03 희열 or 참여 유도 엔딩</b> — 저장·댓글·공유를 부르는 마무리
+</div>""", unsafe_allow_html=True)
+
+    with st.expander("② NOMI 공식 — 바이럴의 골격"):
+        st.markdown(f"""
+<div style='font-size:13px;line-height:1.7;'>
+쇼츠 릴스가 <b>CTR 8.7%</b>를 찍었을 때 역으로 뜯어보니 이 순서. 타겟을 좁히고 → 고통에 공감하고 → 만든 이유를 말하고 → 임팩트로 닫는다.<br><br>
+<b style='color:{_AC};'>N — Narrow Identity</b> 타겟을 콕 집어 좁힌다 · "보수적인 한국 여자 러너들 모이세요"<br>
+<b style='color:{_AC};'>O — Own the Pain</b> 그 사람만 아는 고통을 대신 말해준다 · "입을 때마다 신경 쓰임"<br>
+<b style='color:{_AC};'>M — Maker Story</b> 그래서 내가 만들었다는 서사 · 브랜드 신뢰가 여기서 생김<br>
+<b style='color:{_AC};'>I — Impact Close</b> 저장·공유를 부르는 한 방으로 닫는다<br><br>
+<span style='color:{_SG};'>▸ 타겟을 좁힐수록 "내 얘기다" 반응이 세짐. 넓게 말하면 아무도 안 멈춤.</span>
+</div>""", unsafe_allow_html=True)
+
+    with st.expander("③ NOMI+R — 진화형 (REVEAL)"):
+        st.markdown(f"""
+<div style='font-size:13px;line-height:1.7;'>
+"그래서 제가 만들었어요"를 매번 쓰면 지루. 말로 하는 M을 <b>보여주는 REVEAL</b>로 교체 — 말 대신 화면이 반전을 만든다.<br><br>
+<b>N</b> 타겟 좁히기 · <b>O</b> 고통 공감 · <b style='color:{_AC};'>R 👁 Reveal</b> 시각으로 반전(M 대체) · <b>I</b> 임팩트 마무리<br><br>
+<b>4가지 REVEAL 유형</b><br>
+· <b>물건</b> — 제품 자체가 반전: "이거 사실 한 장이에요"<br>
+· <b>반응</b> — 타인의 리액션: 친구 "야 이거 진짜 차갑다"<br>
+· <b>기능</b> — 숨겨진 기능 공개: 플리츠 주름 → 공기 순환<br>
+· <b>대비</b> — before/after: 밤티 시장 vs 노미니컬
+</div>""", unsafe_allow_html=True)
+
+    with st.expander("④ 훅 공식 라이브러리 (6가지)"):
+        st.markdown(f"""
+<div style='font-size:13px;line-height:1.7;'>
+첫 3초를 여는 6가지 검증된 방식. 같은 공식 반복하면 식으니 돌려쓰는 게 핵심.<br><br>
+<b style='color:{_AC};'>통념 깨기</b> "~라는 착각" · "러닝 잘하려면 스타일은 포기해야 한다는 착각"<br>
+<b style='color:{_AC};'>패턴 인터럽트</b> 포기하세요 → 근데!!! · "더워서 못 입어요. 포기하세요. 근데!!!"<br>
+<b style='color:{_AC};'>타겟 콜아웃</b> "~한 분들 모이세요" · "보수적인 한국 여자 러너들 모이세요"<br>
+<b style='color:{_AC};'>행동 묘사</b> 구체적 상황 재현 · "긴팔 걸치고 나가는 사람 저만이에요?"<br>
+<b style='color:{_AC};'>REVEAL 당기기</b> 궁금증 먼저 · "친구가 만지더니 '이거 차갑다' 했어요"<br>
+<b style='color:{_AC};'>반전 선언</b> "사실 한 장이에요" · 두 장처럼 보이는데 한 장
+</div>""", unsafe_allow_html=True)
+
+    with st.expander("⑤ 엔딩 시그니처"):
+        st.markdown(f"""
+<div style='font-size:13px;line-height:1.7;'>
+제품 설명 끝에 로고 띄우는 것보다, 이 한 마디가 브랜드를 오래 기억하게 만들어요.<br><br>
+<b style='color:{_AC};'>도발형</b> — "이런 건 노미니컬만 할 수 있어요. 아시겠죠?"<br>
+<span style='color:{_SG};'>"아시겠죠?"가 동의를 전제 — 보는 사람이 자기도 모르게 "어… 어" 하게 됨</span><br><br>
+<b style='color:{_AC};'>여유형 · 퀸 에너지</b> — "노미니컬. 진짜 잘한다."<br>
+<span style='color:{_SG};'>도발이 아니라 여유. 웃으면서 던지는 자신감이 캐릭터를 만듦</span><br><br>
+<b>촬영 팁</b> 이 마지막 멘트는 <b>카메라 정면 응시</b>로. 달리다 멈추고 똑바로 보며 말하는 느낌.
+</div>""", unsafe_allow_html=True)
+
+    with st.expander("⑥ 릴스 5가지 유형"):
+        st.markdown(f"""
+<table style='width:100%;border-collapse:collapse;font-size:12.5px;'>
+<thead><tr style='background:#F1F2EE;'>
+<th style='padding:8px 10px;text-align:left;border-bottom:1px solid #DEDDD6;'>유형</th>
+<th style='padding:8px 10px;text-align:left;border-bottom:1px solid #DEDDD6;'>길이</th>
+<th style='padding:8px 10px;text-align:left;border-bottom:1px solid #DEDDD6;'>구조</th>
+<th style='padding:8px 10px;text-align:left;border-bottom:1px solid #DEDDD6;'>최적 목적</th></tr></thead>
+<tbody>
+<tr><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'><b>공감 스토리</b></td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>15~30초</td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>공감 상황 → 반전 → 해결</td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>팔로우·공유</td></tr>
+<tr><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'><b>반직관 정보</b></td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>20~40초</td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>통념 → 반박 → 증명</td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>저장·공유</td></tr>
+<tr><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'><b>제품 리빌</b></td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>15~25초</td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>문제 → 솔루션 reveal → CTA</td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>구매 전환</td></tr>
+<tr><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'><b>비하인드</b></td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>30~60초</td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>호기심 → 과정 공개 → 결과</td><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;'>신뢰 구축</td></tr>
+<tr><td style='padding:7px 10px;'><b>교육형</b></td><td style='padding:7px 10px;'>30~60초</td><td style='padding:7px 10px;'>훅 질문 → 단계 설명 → 저장</td><td style='padding:7px 10px;'>저장·권위</td></tr>
+</tbody></table>
+<div style='font-size:12.5px;line-height:1.7;margin-top:10px;color:#565A4F;'>
+<b style='color:{_AC};'>길이 룰</b> 기본 30초, 완주율 사수. 기능 설명 길면 V.O.로 다 말하지 말고 자막+클로즈업. 30초 넘으면 이탈.<br>
+<b style='color:{_AC};'>동기화 룰</b> 음성=설명, 화면=증거. 말한 걸 화면에 그대로 보여주지 않기. 최소 5초마다 컷, 텍스트 3단어 이내.
+</div>""", unsafe_allow_html=True)
+
+    with st.expander("⑦ 상세페이지 첫 문장 공식"):
+        st.markdown(f"""
+<div style='font-size:13px;line-height:1.7;'>
+첫 문장은 <b>설명이 아니라 공감</b>. 고객은 "이 옷이 뭔지"가 아니라 "나한테 맞는지"를 보러 들어와요.<br><br>
+<b style='color:{_AC};'>공식 1 · 이런 사람한테 딱인 옷</b> [상황·고민]+[해결] · "몸매 부각 싫고, 땀 많고, 화려한 건 더 싫을 때"<br>
+<b style='color:{_AC};'>공식 2 · 속마음 대신 말해주기</b> 검색창에 치고 싶던 말 그대로 · "기능성 운동복, 왜 다 딱 붙어?"<br>
+<b style='color:{_AC};'>공식 3 · 이 옷의 존재 이유</b> [문제] 해결하려고 만든 옷 · "달라붙지 않는 기능성, 없어서 만든 옷"<br><br>
+<b>적용 3단계</b> ① 주요 고객 한 명 떠올리기 → ② 사기 직전 드는 생각 적기 → ③ <b>예쁘게 다듬지 말고</b> 그대로 첫 문장으로
+</div>""", unsafe_allow_html=True)
+
+    with st.expander("⑧ 톤앤매너 & AI 티 제거"):
+        st.markdown(f"""
+<div style='font-size:13px;line-height:1.7;'>
+노미니컬 목소리는 담백한 1인칭 구어체. 개인 경험 → 보편 공감. <b>날것의 말투를 과하게 다듬지 않는 게</b> 매력의 핵심.<br><br>
+<b style='color:#999;'>✕ 삭제할 표현</b><br>
+· "안녕하세요 여러분"으로 시작 · "오늘은 ~에 대해 알아보겠습니다" · "도움이 되셨으면 좋겠습니다"<br>
+· 과장·오글거리는 최상급("완벽한","역대급") · 날것 문장을 매끈하게 깎기<br><br>
+<b style='color:{_AC};'>→ 대체 표현</b><br>
+· 상황 직접 시작("달리다가 자꾸…") · 질문으로("왜 여자 쇼츠는 다 이래?") · 반전으로("사실 이거 한 장이에요")<br>
+· 담백한 선언("여름엔 긴팔이 더 시원함") · "야시꾸리한" 같은 본인 단어 살리기
+</div>""", unsafe_allow_html=True)
+
+    with st.expander("⑨ 발행 전략"):
+        st.markdown(f"""
+<div style='font-size:13px;line-height:1.7;'>
+콘텐츠만큼 <b>언제·어떤 순서로</b> 올리느냐가 전환을 만들어요.<br><br>
+<b style='color:{_AC};'>모멘텀</b> 수요 신호 있는 것 먼저 — 댓글·DM로 기다리는 제품 우선. 새 유입보다 대기 수요가 전환 빠름<br>
+<b style='color:{_AC};'>간격</b> 같은 날 2개 금지 — 하나 반응 달아올랐을 때 다음 걸로 이어받기<br>
+<b style='color:{_AC};'>전환</b> 프리오더보다 즉시 구매 — 바이럴 여세엔 "바로 살 수 있음"이 이김. <b>48시간 한정 10% 할인</b>으로 긴장감
+</div>""", unsafe_allow_html=True)
+
+    st.markdown(f"""
+<div style='font-family:monospace;font-size:11px;color:#999;margin-top:18px;letter-spacing:0.05em;'>
+공식은 반복하되, 훅과 엔딩은 매번 돌려쓸 것 — 같은 공식도 표현이 지루하면 안 먹힘.
+</div>""", unsafe_allow_html=True)
 
 
 # ── 푸터 ───────────────────────────────────────────────────────────
