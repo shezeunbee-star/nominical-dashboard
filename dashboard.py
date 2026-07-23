@@ -362,7 +362,7 @@ def load_meta_ad_insights(date_preset="last_30d"):
             f"https://graph.facebook.com/v25.0/{AD_ACCOUNT}/insights",
             params={
                 "level": "ad",
-                "fields": "ad_id,ad_name,adset_name,campaign_name,spend,impressions,clicks,ctr,actions,purchase_roas",
+                "fields": "ad_id,ad_name,adset_name,campaign_name,spend,impressions,reach,frequency,clicks,ctr,actions,purchase_roas",
                 "date_preset": date_preset,
                 "limit": 100,
                 "access_token": meta_token,
@@ -393,6 +393,7 @@ def load_meta_ad_insights(date_preset="last_30d"):
             spend  = round(float(d.get("spend", 0)))
             clicks = int(d.get("clicks", 0))
             imps   = int(d.get("impressions", 0))
+            freq   = round(float(d.get("frequency", 0)), 2)  # 1인당 평균 노출 (2 넘으면 피로 신호)
             ctr    = round(float(d.get("ctr", 0)), 2)   # Meta API: 이미 % 값
             cpo    = round(spend / purchases) if purchases > 0 else 0
             roas   = round(revenue / spend, 1) if spend > 0 else 0
@@ -410,6 +411,7 @@ def load_meta_ad_insights(date_preset="last_30d"):
                 "전체경로": _full_name,
                 "광고비":   spend,
                 "노출수":  imps,
+                "빈도":    freq,
                 "클릭수":  clicks,
                 "CTR":    ctr,
                 "전환수":  purchases,
@@ -2535,11 +2537,16 @@ with tab1:
             )
             _conv_c = "#27AE60" if _r["전환수"] > 0 else "#999"
             _full   = str(_r["전체경로"])
+            # 빈도 색상: 2 미만 정상, 2~3 주의(주황), 3+ 피로(빨강)
+            _freq_v = _r.get("빈도", 0)
+            _freq_c = "#E74C3C" if _freq_v >= 3 else ("#F39C12" if _freq_v >= 2 else "#1A1A1A")
+            _freq_w = "700" if _freq_v >= 2 else "400"
             _rows_html += f"""<tr>
                 <td style='padding:6px 10px;border-bottom:1px solid #F0F0F0;'>{_thumb_html}</td>
                 <td style='padding:7px 10px;font-size:11px;color:#333;border-bottom:1px solid #F0F0F0;max-width:300px;line-height:1.4;'>{_full}</td>
                 {_td(f"{int(_r['광고비']):,}원")}
                 {_td(f"{int(_r['노출수']):,}")}
+                <td style='padding:7px 10px;font-size:12px;font-weight:{_freq_w};color:{_freq_c};border-bottom:1px solid #F0F0F0;text-align:right;white-space:nowrap;'>{_freq_v:.2f}</td>
                 {_td(f"{int(_r['클릭수']):,}")}
                 {_td(f"{_r['CTR']:.2f}%")}
                 <td style='padding:7px 10px;font-size:12px;font-weight:700;color:{_conv_c};border-bottom:1px solid #F0F0F0;text-align:right;'>{int(_r['전환수'])}건</td>
@@ -2553,7 +2560,7 @@ with tab1:
         <table style='width:100%;border-collapse:collapse;'>
             <thead><tr>
                 {_th('썸네일')}{_th('캠페인 > 광고세트 > 소재명')}
-                {_th('광고비')}{_th('노출')}{_th('클릭')}{_th('CTR')}
+                {_th('광고비')}{_th('노출')}{_th('빈도')}{_th('클릭')}{_th('CTR')}
                 {_th('전환')}{_th('CPO')}{_th('ROAS')}{_th('매출')}
             </tr></thead>
             <tbody>{_rows_html}</tbody>
@@ -2583,6 +2590,14 @@ with tab1:
                     f"💡 <b>CTR 높으나 전환 0건 소재 {len(_high_ctr_no_conv)}개</b> — 클릭 유입은 있으나 랜딩 후 이탈. "
                     f"소재·랜딩 메시지 불일치 가능성. 랜딩 URL 및 상품 페이지 구성 점검 필요."
                 )
+            if "빈도" in df_ads.columns:
+                _high_freq = df_ads[(df_ads["빈도"] >= 2) & (df_ads["광고비"] > 0)].sort_values("빈도", ascending=False)
+                if not _high_freq.empty:
+                    _hf = _high_freq.iloc[0]
+                    _insight_lines.append(
+                        f"🔁 <b>빈도 2 이상 소재 {len(_high_freq)}개</b> — 최고 '{str(_hf['소재명'])[:30]}' 빈도 {_hf['빈도']:.2f} "
+                        f"(같은 사람에게 평균 {_hf['빈도']:.1f}번 노출). 새 사람에게 안 닿고 같은 모수만 반복 노출 중 — 소재 교체로 도달 리셋 필요."
+                    )
             for line in _insight_lines:
                 st.markdown(f"<div style='font-size:13px;line-height:1.8;padding:4px 0'>{line}</div>",
                             unsafe_allow_html=True)
