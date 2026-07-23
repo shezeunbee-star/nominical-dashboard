@@ -3996,6 +3996,128 @@ with tab7:
 </div>
 """, unsafe_allow_html=True)
 
+    # ════════════════════════════════════════════════════════════
+    # 2층 — 상품별 실행서 (지도 → 실제 찍을 수 있는 대본)
+    # ════════════════════════════════════════════════════════════
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(f"""
+<div style='border-top:2px solid #DEDDD6;padding-top:20px;'>
+  <div style='font-family:monospace;font-size:11px;letter-spacing:0.18em;color:{_AC};text-transform:uppercase;'>EXECUTION / 실행서</div>
+  <div style='font-size:22px;font-weight:800;letter-spacing:-0.02em;margin-top:6px;'>상품별 <span style='color:{_AC};'>실행 대본</span></div>
+  <div style='color:#8C8C8C;font-size:13px;margin-top:6px;max-width:46rem;'>
+    위 지도가 "어디에 뭘"이라면, 여기는 "어떻게 찍나". 훅 패턴 · 실제 대사 · REVEAL 유형 · 목적 · 엔딩까지.
+    <b style='color:{_AC};'>대원칙 — 절대 팔려고 하지 않는다.</b> 팔려는 티가 나는 순간 소비자는 도망간다.
+    SNS는 문제로 스크롤을 멈추고, 자사몰은 해결을 비주얼로 담백하게 보여줄 뿐.</div>
+</div>
+""", unsafe_allow_html=True)
+
+    def _exec_block(title, strategy, official, personal, mall, extra):
+        """상품 실행서 한 블록 렌더."""
+        _off_rows = "".join(
+            f"<tr><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;font-weight:700;color:{_AC};white-space:nowrap;vertical-align:top;'>{s}</td>"
+            f"<td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;font-size:12.5px;line-height:1.5;'>{c}</td></tr>"
+            for s, c in official)
+        _mall_rows = "".join(
+            f"<tr><td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;font-weight:700;white-space:nowrap;vertical-align:top;'>{u}</td>"
+            f"<td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;font-size:12.5px;'>{v}</td>"
+            f"<td style='padding:7px 10px;border-bottom:1px solid #F0EFEA;font-size:12.5px;color:#565A4F;'>{cp}</td></tr>"
+            for u, v, cp in mall)
+        _personal = "".join(f"<li style='margin-bottom:3px;'>{p}</li>" for p in personal)
+        st.markdown(f"""
+<div style='background:{_AC}12;border-left:3px solid {_AC};border-radius:2px;padding:12px 16px;margin-bottom:14px;font-size:13px;'>
+  <b>전략 한 줄</b> — {strategy}</div>
+
+<div style='font-size:13px;font-weight:750;margin:14px 0 6px;'>① 공식 인스타 — 메인 릴스 (훅→전환 전구간)</div>
+<table style='width:100%;border-collapse:collapse;'>
+<thead><tr style='background:#F1F2EE;'>
+<th style='padding:7px 10px;text-align:left;border-bottom:1px solid #DEDDD6;font-size:11px;color:#565A4F;width:80px;'>단계</th>
+<th style='padding:7px 10px;text-align:left;border-bottom:1px solid #DEDDD6;font-size:11px;color:#565A4F;'>실행물</th>
+</tr></thead><tbody>{_off_rows}</tbody></table>
+
+<div style='font-size:13px;font-weight:750;margin:16px 0 6px;'>② 개인 인스타 — 삶으로 (판매 없이)</div>
+<ul style='font-size:12.5px;line-height:1.55;color:#1B1C18;margin:0;padding-left:18px;'>{_personal}</ul>
+
+<div style='font-size:13px;font-weight:750;margin:16px 0 6px;'>③ 자사몰 — 해결 비주얼 <span style='font-weight:400;color:#8C8C8C;'>(설득 X · 카피는 팩트만)</span></div>
+<table style='width:100%;border-collapse:collapse;'>
+<thead><tr style='background:#F1F2EE;'>
+<th style='padding:7px 10px;text-align:left;border-bottom:1px solid #DEDDD6;font-size:11px;color:#565A4F;width:90px;'>USP</th>
+<th style='padding:7px 10px;text-align:left;border-bottom:1px solid #DEDDD6;font-size:11px;color:#565A4F;'>극적 비주얼</th>
+<th style='padding:7px 10px;text-align:left;border-bottom:1px solid #DEDDD6;font-size:11px;color:#565A4F;'>카피 (담백)</th>
+</tr></thead><tbody>{_mall_rows}</tbody></table>
+{extra}
+""", unsafe_allow_html=True)
+
+    with st.expander("🧥 쉬어 경량패딩 — 첫 상품·17만원·데이터 0 → 콘텐츠가 유일한 무기", expanded=True):
+        _exec_block("패딩",
+            "\"세탁 가능\"이라는 유일무이한 USP를 REVEAL로 증명하고, 첫 고가 아우터의 가격저항을 리뷰+즉시구매로 넘는다.",
+            [("인지","<b>훅: 통념깨기</b> · 첫 대사 <i>\"패딩은 자주 빨면 죽는다? 그건 다운 얘기고요.\"</i> · 목적: <b>저장</b>"),
+             ("공감","<b>Own the Pain</b> · <i>\"운동하고 땀 뺀 날, 패딩 입기 찝찝하지 않아요? 냄새 밸까 봐.\"</i>"),
+             ("신뢰","<b>REVEAL: 대비형 👁</b> · 말 없이 화면 — 세탁기 투척 → 돌아가는 창 → 뽀송한 배플 클로즈업 · 자막 <i>\"그냥. 세탁기에.\"</i>"),
+             ("전환","엔딩(여유형) <i>\"노미니컬. 진짜 잘한다.\"</i> 정면 응시 + 링크 · ⚠️ 프리오더 X / 48시간 10% 한정")],
+            ["러닝 후 그대로 카페 가는 브이로그 (USP3 '운동 후 일정까지' 삶으로 노출)",
+             "\"땀 많은데 패딩 부담\" 진짜 토로 — 연출 아닌 일상 톤",
+             "직접 세탁기 돌려보는 모습 — 공식계정 REVEAL의 '진짜 사용자' 버전"],
+            [("세탁","세탁기에서 갓 나온 뽀송한 패딩, 물방울 슬로우모션","집 세탁기로 세탁할 수 있습니다."),
+             ("반투명 발색","역광에서 겉감을 빛이 통과, 컬러 한 톤 밝게 뜨는 컷","안쪽 충전재가 비쳐 컬러가 한 톤 밝게 발색됩니다."),
+             ("활용","러닝→카페 이어지는 착장, 갈아입지 않은 흐름 컷","갈아입지 않고 이어집니다.")],
+            f"""<div style='background:#FFF6F2;border:1px solid #F0D9CE;border-radius:2px;padding:12px 14px;margin-top:12px;font-size:12.5px;line-height:1.6;'>
+<b style='color:{_AC};'>⚠️ 첫 상품 리스크 — 남성 싱글렛 교훈</b><br>
+싱글렛 참패 원인(심리장벽+컬러 단조+착용샷 부재)이 패딩에도 위험:<br>
+① <b>착용샷 필수</b> (플랫레이 금지) · ② 세탁 REVEAL로 "싸구려 첫 패딩 아님" 증명 · ③ <b>리뷰 없으면 광고 트래픽 태우지 말 것</b> (리뷰 0 + 유료 유입 = 전환 0 반복)<br><br>
+<b>리뷰</b> — 초기 구매자 리뷰 확보 최우선(체험단/지인 러너). 단 "이만큼 만족!"으로 들이대지 않고, 그냥 거기 있게.<br>
+<b>📌 팩트체크 대기</b> — USP2 "반투명" 표현은 쉬어 원단 확정 후 강도 조정 → REVEAL 콘텐츠도 원단 확정 전 "반투명 발색" 강조 보류</div>""")
+
+    with st.expander("🧥 AeroZest 바람막이 — 작년 50장 완판·시즌 오프너(9월 최우선 발행)"):
+        _exec_block("바람막이",
+            "검증된 상품이니 신상품처럼 증명할 필요 없다. \"작년 그 바람막이 + 개선점\"을 여유 있게. 완판 이력이 최고의 poise.",
+            [("인지","<b>훅: 패턴 인터럽트</b> · <i>\"바람막이는 3km부터 짐이 돼요. …근데 이건 아니더라고요.\"</i> · 목적: 저장·공유"),
+             ("공감","<b>행동묘사</b> · <i>\"더워서 벗으면 손에 들고 뛰어야 하고, 가방 없으면 허리에 애매하게 묶고.\"</i> · \"저만 그래요?\""),
+             ("신뢰","<b>REVEAL: 기능형 👁</b> · 와샤 원단 막 구겨 벨트에 꽂았다 → 꺼내니 구김 없음 · 자막 <i>\"구겨도 돼요.\"</i> + 완판 이력 한 줄"),
+             ("전환","핑거홀·투웨이 지퍼 클로즈업 → 엔딩(도발형) <i>\"이런 건 노미니컬만 해요. 아시겠죠?\"</i> + 링크 · 48시간 한정")],
+            ["관악산→한강 카페 러닝 브이로그, 바람막이 자연 착용",
+             "\"바스락거리는 바람막이 답답했다\" 진짜 토로",
+             "데일리로 막 입고 다니는 모습 — 완판템의 '실사용' 증명"],
+            [("핑거홀","시린 출발 구간, 엄지 걸어 손등까지 덮은 손 클로즈업","손이 가장 시린 출발 구간을 장갑 없이 지납니다."),
+             ("투웨이 지퍼","뛰다가 하단만 스윽 여는 손동작","체온이 오르면 하단을 열어 통풍을 조절합니다."),
+             ("와샤 가공","구겨 가방에 넣고 → 꺼내 바로 입는 흐름 컷","구겨도 자국이 남지 않습니다.")],
+            f"""<div style='background:#FFF6F2;border:1px solid #F0D9CE;border-radius:2px;padding:12px 14px;margin-top:12px;font-size:12.5px;line-height:1.6;'>
+<b>📌 팩트체크 대기</b> — "완판" 표현은 26SS 완판 확인되면 "작년 완판"으로 담백히. 확인 전엔 "작년 그대로의 실루엣"</div>""")
+
+    with st.expander("🧣 러닝 비니 — 저관여·저가·안전 카드 → 힘 빼고 릴스 1개면 충분"):
+        _exec_block("비니",
+            "저관여·저가라 릴스 하나로 충분. \"기능성 비니인데 안 못생김\" 하나만 각인.",
+            [("인지","<b>훅: 행동묘사</b> · <i>\"얇은 러닝비니 쓰면 두상 다 드러나는 거, 저만 그래요?\"</i> · 댓글 유도"),
+             ("공감","<b>통념 반박</b> · \"기능성이면 스타일은 포기, 그게 당연한 줄 알았죠.\""),
+             ("신뢰","<b>REVEAL: 대비형</b> · 흔한 기능성 비니(콘돔핏) vs 노미니컬 핏, 같은 사람 번갈아 착용"),
+             ("전환","항균·세탁 3단어 자막 → 부담 없는 오픈 · 엔딩(여유형) <i>\"노미니컬. 진짜 잘한다.\"</i>")],
+            ["러닝 후 비니 쓴 일상샷, \"콘돔핏 놀림당한\" 썰 가볍게"],
+            [("핏","두상 안 드러나는 실루엣, 옆모습 클로즈업","두상이 드러나지 않는 핏입니다."),
+             ("울혼방 항균","—","울 혼방 원단으로 냄새를 억제합니다."),
+             ("세탁","—","세탁기로 세탁할 수 있습니다.")],
+            f"""<div style='background:#F5F5F1;border:1px solid #E5E4DE;border-radius:2px;padding:12px 14px;margin-top:12px;font-size:12.5px;line-height:1.6;'>
+<b>번들</b> — 패딩·바람막이 구매 시 코디 제안으로 자연 노출. 푸시 아님, 그냥 옆에 있음.</div>""")
+
+    with st.expander("👕 Better Stripe 티셔츠 — 여름~가을 브릿지·롱런 → 급할 것 없음"):
+        _exec_block("티셔츠",
+            "\"러닝복인데 스트라이프\" — 시장에 없던 조합 자체가 훅. 시즌 오래 가니 급하게 팔 이유 없음.",
+            [("인지","<b>훅: 타겟 콜아웃</b> · <i>\"스트라이프 좋아하는데 러닝복은 다 민무늬인 분들 모이세요.\"</i> · 목적: 팔로우·공유"),
+             ("공감","<b>패턴 공백이 갈등</b> · \"스트라이프 티는 많은데, 전부 면이라 러닝엔 못 입었죠.\""),
+             ("신뢰","<b>교육형</b> · \"왜 패턴 러닝복이 드문가\" 잠깐 설명 → 냉감 소재 클로즈업"),
+             ("전환","멀리선 은은/가까이선 선명한 스트라이프 대비 컷 → 부담 없는 오픈 · 엔딩(여유형)")],
+            ["여름 훈련 데일리 착용, \"러닝복에 스트라이프 없어서 아쉬웠다\" 톤"],
+            [("기능성 원단","땀 흘려도 안 젖어 무거워지지 않는 러닝 컷","땀을 배출해 젖어 무거워지지 않습니다."),
+             ("레드 스트라이프","원/근거리 두 컷으로 발색 차이","멀리서는 은은하게, 가까이서는 선명하게 보입니다."),
+             ("시즌 브릿지","단독 → 긴팔 위 레이어드 두 착장","여름엔 단독, 기온이 떨어지면 레이어드로.")],
+            f"""<div style='background:#F5F5F1;border:1px solid #E5E4DE;border-radius:2px;padding:12px 14px;margin-top:12px;font-size:12.5px;line-height:1.6;'>
+<b>레이어드 크로스셀</b> — 페이크 레이어드티(기존 베스트)와 함께 스타일링 노출 → 재고 같이 돎<br>
+<b>📌 팩트체크 대기</b> — 비침 테스트 결과 따라 안심 문구 검토</div>""")
+
+    st.markdown(f"""
+<div style='display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:#8C8C8C;'>
+  <span><b style='color:#1B1C18;'>콘텐츠 강도 배분</b> — 패딩(최고) · 바람막이(높음) · 티셔츠(중간) · 비니(낮음). 리스크 큰 데 몰아주기.</span>
+</div>
+""", unsafe_allow_html=True)
+
     # ── SNS 필승 플레이북 ────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(f"""
