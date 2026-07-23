@@ -445,10 +445,12 @@ def load_meta_ad_insights(date_preset="last_30d"):
 
 
 @st.cache_data(ttl=3600)
-@st.cache_data(ttl=3600)
 def load_meta_creative_fatigue(date_preset="last_14d"):
     """소재별 CTR 추이로 피로도 분석. 교체 필요 소재 목록 반환.
-    date_preset: '광고 소재별 성과' 섹션의 기간 선택과 동일한 값을 받아 동기화."""
+    date_preset: '광고 소재별 성과' 섹션의 기간 선택과 동일한 값을 받아 동기화.
+
+    카탈로그/어드밴티지+(ASC) 캠페인은 단일 소재가 아니라 상품이 동적으로 도는
+    구조라 CTR·빈도 기반 소재피로 판단이 맞지 않음 → 피로도 분석에서 제외."""
     try:
         import re as _re
         meta_token = None
@@ -476,14 +478,21 @@ def load_meta_creative_fatigue(date_preset="last_14d"):
             }, timeout=20,
         ).json()
 
+        # 카탈로그/ASC 캠페인 제외 키워드 (단일 소재 아님 → 피로도 판단 부적합)
+        _CATALOG_KW = ("어드밴티지", "advantage", "카탈로그", "catalog", "asc", "다이나믹", "dynamic")
+
         # 소재별 일별 CTR 수집
         ad_daily = {}
         for d in resp.get("data", []):
             name  = d.get("ad_name", "-")
+            campaign = d.get("campaign_name", "")
             spend = float(d.get("spend", 0))
             ctr   = float(d.get("ctr", 0))
             date  = d.get("date_start", "")
             if spend < 100: continue  # 소액 집행일 제외
+            # 카탈로그/ASC는 소재피로 대상 아님 (캠페인명·소재명 둘 다 검사)
+            _hay = f"{campaign} {name}".lower()
+            if any(kw in _hay for kw in _CATALOG_KW): continue
             if name not in ad_daily:
                 ad_daily[name] = {"days": [], "campaign": d.get("campaign_name","")}
             ad_daily[name]["days"].append({"date": date, "ctr": ctr, "spend": spend})
