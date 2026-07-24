@@ -131,19 +131,25 @@ def parse_option(opt_str):
         color, size = parts[0].strip(), parts[1].strip()
     return color, size
 
-def parse_status(order):
-    if order.get("canceled") == "T":
+def item_status(item, order):
+    """Cafe24 아이템 order_status 접두어로 상태 판별.
+    C*=취소, R*=반품, E*=교환, N*=정상. 코드 없으면 order 레벨 canceled 폴백."""
+    code = str(item.get("order_status", "") or "").strip().upper()
+    if code[:1] == "C":
         return "취소"
-    if order.get("paid") == "T":
+    if code[:1] == "R":
+        return "반품"
+    if code[:1] == "E":
+        return "교환"
+    if code[:1] == "N":
         return "결제완료"
-    return "주문접수"
+    return "취소" if order.get("canceled") == "T" else "결제완료"
 
 def parse_orders(orders):
     rows = []
     for order in orders:
         platform   = market_to_platform(order.get("market_id", "self"))
         order_date = (order.get("order_date") or "")[:10]
-        status     = parse_status(order)
 
         items = order.get("items", [])
         if not items:
@@ -156,6 +162,7 @@ def parse_orders(orders):
             total  = price * qty
             comm   = COMMISSION_CAFE24 if platform == "Cafe24" else COMMISSION_DEFAULT
             profit = round(total * (1 - comm / 100))
+            status = item_status(item, order)
 
             rows.append([
                 platform, order_date,

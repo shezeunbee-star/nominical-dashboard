@@ -1632,9 +1632,6 @@ def update_cafe24_yesterday():
         for order in orders:
             platform = _market_to_platform(order.get("market_id"))
             order_date = (order.get("order_date") or "")[:10]
-            # Cafe24 API의 canceled 필드로 취소/반품 상태 판별
-            # (order_place_name="스마트스토어" 주문 확인 시 canceled="T"인 건이 실제 존재함)
-            status = "취소" if str(order.get("canceled", "")).upper() == "T" else "정상"
             order_id_c24 = order.get("order_id", "")
             items = order.get("items", [])
             order_total = 0
@@ -1663,6 +1660,10 @@ def update_cafe24_yesterday():
                 total = price * qty
                 comm  = COMM_CAFE24 if platform == "Cafe24" else COMM_DEFAULT
                 profit = round(total * (1 - comm / 100))
+                # 아이템 order_status 접두어로 상태 판별 (C취소/R반품/E교환/N정상)
+                _os = str(item.get("order_status", "") or "").strip().upper()[:1]
+                status = {"C": "취소", "R": "반품", "E": "교환", "N": "결제완료"}.get(
+                    _os, "취소" if str(order.get("canceled", "")).upper() == "T" else "결제완료")
                 key = f"{platform}|{order_date}|{code}|{color}|{size}"
                 if key not in existing_keys:
                     new_rows.append([platform, order_date, name, code,
@@ -1672,9 +1673,9 @@ def update_cafe24_yesterday():
                 order_total += total
                 order_ga4_items.append({"item_id": code, "item_name": name, "quantity": qty, "price": price})
 
-            # 신규(처음 동기화)이고 취소가 아닌 주문만 GA4로 구매 이벤트 전송
+            # 신규(처음 동기화)이고 취소/반품/교환이 아닌 주문만 GA4로 구매 이벤트 전송
             # — 결제수단(네이버페이 등)과 무관하게 Cafe24 주문 데이터 기준으로 100% 추적
-            if order_has_new and status != "취소" and order_total > 0:
+            if order_has_new and status not in ("취소", "반품", "교환") and order_total > 0:
                 ga4_events.append((order_id_c24 or f"{platform}-{order_date}-{len(ga4_events)}",
                                     order_total, order_ga4_items, order.get("order_date", "")))
 
@@ -1773,7 +1774,7 @@ st.markdown("---")
 
 # ── 탭 분기 ──────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "📊 방문자 · 광고 성과", "🏬 플랫폼별 매출", "📅 기간별 매출 조회",
+    "📊 방문자 · 광고 성과", "🛍 상품/채널별 매출", "📅 기간별 매출 조회",
     "📱 인스타그램 콘텐츠", "📖 플레이북", "📦 입고·재고", "🎬 26FW 콘텐츠보드",
 ])
 
@@ -2837,9 +2838,122 @@ with tab2:
     pf_normal  = pf[
         ~pf["주문상태"].str.contains("취소", na=False) &
         ~pf["주문상태"].str.contains("반품", na=False)
-    ]  # 취소·반품 제외
+    ]  # 취소·반품 제외 (교환은 판매 유지로 간주)
 
     st.markdown("---")
+
+    # ════════════════════════════════════════════════════════════
+    # 🛍 상품별 매출 분석 (상단) — 기간 필터 공유
+    # ════════════════════════════════════════════════════════════
+    import re as _re2
+    def _norm_product(_name):
+        # 프로모션 태그/괄호/컬러 표기를 제거해 같은 상품을 하나로 묶는다
+        n = str(_name)
+        n = _re2.sub(r'\[[^\]]*\]', ' ', n)          # [RESTOCK] [3차리오더] 등
+        n = _re2.sub(r'\([^)]*\)', ' ', n)           # (남녀공용) (프리오더…) (블랙) 등
+        n = _re2.sub(r'\s+', ' ', n).strip()
+        # 끝에 남은 컬러 표기(괄호 없이 "…쇼츠 블랙") 정리는 상품명 앞부분 유지로 대체
+        return n or str(_name).strip()
+
+    _pfp = pf.copy()
+    _pfp["상품기준"] = _pfp["상품명"].apply(_norm_product)
+    _pfp["_수량"] = pd.to_numeric(_pfp["수량"], errors="coerce").fillna(0)
+    _is_cancel   = _pfp["주문상태"].str.contains("취소", na=False)
+    _is_return   = _pfp["주문상태"].str.contains("반품", na=False)
+    _is_exchange = _pfp["주문상태"].str.contains("교환", na=False)
+    _is_sold     = ~(_is_cancel | _is_return)   # 순수 판매 (교환은 매출 유지 → 판매 포함)
+
+    chart_container("🛍 상품별 매출 분석", f"{pf_preset} · 취소·반품·교환율까지 상품 단위로")
+
+    # ── 상품 KPI ──────────────────────────────────────────────────
+    _sold = _pfp[_is_sold]
+    _tot_qty   = int(_pfp["_수량"].sum())
+    _sold_qty  = int(_sold["_수량"].sum())
+    _n_products = _sold["상품기준"].nunique()
+    _cancel_qty = int(_pfp[_is_cancel]["_수량"].sum())
+    _return_qty = int(_pfp[_is_return]["_수량"].sum())
+    _exch_qty   = int(_pfp[_is_exchange]["_수량"].sum())
+    _cr = round(_cancel_qty / _tot_qty * 100, 1) if _tot_qty else 0
+    _rr = round(_return_qty / _tot_qty * 100, 1) if _tot_qty else 0
+    _er = round(_exch_qty   / _tot_qty * 100, 1) if _tot_qty else 0
+
+    pk1, pk2, pk3, pk4, pk5 = st.columns(5)
+    with pk1: kpi_card("판매 상품 종류", f"{_n_products}종")
+    with pk2: kpi_card("순 판매수량", f"{_sold_qty:,}개", "취소·반품 제외")
+    with pk3: kpi_card("취소율", f"{_cr}%", f"{_cancel_qty}개", _cr < 5)
+    with pk4: kpi_card("반품율", f"{_rr}%", f"{_return_qty}개", _rr < 5)
+    with pk5: kpi_card("교환율", f"{_er}%", f"{_exch_qty}개 (사이즈·품질 신호)", _er < 5)
+
+    # ── 반응 좋은 TOP 3 (순 판매수량 기준) ─────────────────────────
+    _rank = (_sold.groupby("상품기준")
+             .agg(수량=("_수량","sum"), 순매출=("실수익","sum"))
+             .reset_index().sort_values("수량", ascending=False))
+    _rank["순매출"] = pd.to_numeric(_rank["순매출"], errors="coerce").fillna(0)
+    if not _rank.empty:
+        st.markdown("<div style='font-size:14px;font-weight:700;margin:14px 0 8px;'>🔥 반응 좋은 상품 TOP 3</div>", unsafe_allow_html=True)
+        _medals = ["🥇","🥈","🥉"]
+        tcols = st.columns(3)
+        for _i, (_, _row) in enumerate(_rank.head(3).iterrows()):
+            with tcols[_i]:
+                st.markdown(
+                    f"<div style='background:#FAFAFA;border:1px solid #EBEBEB;border-left:3px solid {COLOR['orange']};"
+                    f"border-radius:8px;padding:12px 14px;'>"
+                    f"<div style='font-size:20px;'>{_medals[_i]}</div>"
+                    f"<div style='font-size:13px;font-weight:700;margin-top:4px;line-height:1.35;min-height:36px;'>{_row['상품기준'][:32]}</div>"
+                    f"<div style='font-size:12px;color:#8C8C8C;margin-top:6px;'>{int(_row['수량'])}개 · 순매출 {int(_row['순매출']):,}원</div>"
+                    f"</div>", unsafe_allow_html=True)
+
+    # ── 상품별 판매 추이 (상위 5개, 일별) ──────────────────────────
+    if not _sold.empty and "주문일_dt" in _sold.columns:
+        _top5 = _rank.head(5)["상품기준"].tolist()
+        _trend = _sold[_sold["상품기준"].isin(_top5)].copy()
+        _trend["_일"] = _trend["주문일_dt"].dt.date
+        _piv = (_trend.groupby(["_일","상품기준"])["_수량"].sum().reset_index())
+        if not _piv.empty and _piv["_일"].nunique() > 1:
+            st.markdown("<div style='font-size:14px;font-weight:700;margin:18px 0 4px;'>📈 상품별 판매 추이 (TOP 5)</div>", unsafe_allow_html=True)
+            _fig = px.line(_piv, x="_일", y="_수량", color="상품기준", markers=True,
+                           labels={"_일":"날짜","_수량":"판매수량","상품기준":"상품"}, height=340)
+            _fig.update_layout(plot_bgcolor="white", paper_bgcolor="white",
+                               margin=dict(l=10,r=10,t=10,b=10), legend=dict(font=dict(size=10), orientation="h", y=-0.25),
+                               font=dict(family="Pretendard, sans-serif", size=11))
+            st.plotly_chart(_fig, use_container_width=True)
+
+    # ── 상품별 상세 테이블 ────────────────────────────────────────
+    _detail = _pfp.groupby("상품기준").apply(lambda g: pd.Series({
+        "순판매": int(g[~(g["주문상태"].str.contains("취소|반품", na=False))]["_수량"].sum()),
+        "순매출": int(pd.to_numeric(g[~(g["주문상태"].str.contains("취소|반품", na=False))]["실수익"], errors="coerce").fillna(0).sum()),
+        "취소": int(g[g["주문상태"].str.contains("취소", na=False)]["_수량"].sum()),
+        "반품": int(g[g["주문상태"].str.contains("반품", na=False)]["_수량"].sum()),
+        "교환": int(g[g["주문상태"].str.contains("교환", na=False)]["_수량"].sum()),
+    })).reset_index().sort_values("순판매", ascending=False)
+
+    _th = lambda t: f"<th style='padding:8px 10px;background:#F7F7F7;font-size:12px;font-weight:600;color:#555;border-bottom:2px solid #E8E8E8;text-align:right;white-space:nowrap;'>{t}</th>"
+    _thl = lambda t: f"<th style='padding:8px 10px;background:#F7F7F7;font-size:12px;font-weight:600;color:#555;border-bottom:2px solid #E8E8E8;text-align:left;'>{t}</th>"
+    _rows_html = ""
+    for _, _r in _detail.iterrows():
+        _cc = "#E74C3C" if _r["취소"] > 0 else "#CCC"
+        _rc = "#E74C3C" if _r["반품"] > 0 else "#CCC"
+        _ec = "#F39C12" if _r["교환"] > 0 else "#CCC"
+        _rows_html += (
+            f"<tr>"
+            f"<td style='padding:7px 10px;font-size:12.5px;border-bottom:1px solid #F0F0F0;'>{_r['상품기준'][:36]}</td>"
+            f"<td style='padding:7px 10px;font-size:12.5px;text-align:right;font-weight:700;border-bottom:1px solid #F0F0F0;'>{int(_r['순판매']):,}</td>"
+            f"<td style='padding:7px 10px;font-size:12.5px;text-align:right;border-bottom:1px solid #F0F0F0;'>{int(_r['순매출']):,}원</td>"
+            f"<td style='padding:7px 10px;font-size:12.5px;text-align:right;color:{_cc};border-bottom:1px solid #F0F0F0;'>{int(_r['취소'])}</td>"
+            f"<td style='padding:7px 10px;font-size:12.5px;text-align:right;color:{_rc};border-bottom:1px solid #F0F0F0;'>{int(_r['반품'])}</td>"
+            f"<td style='padding:7px 10px;font-size:12.5px;text-align:right;color:{_ec};border-bottom:1px solid #F0F0F0;'>{int(_r['교환'])}</td>"
+            f"</tr>"
+        )
+    st.markdown(f"""
+    <div style='overflow-x:auto;margin-top:10px;'>
+    <table style='width:100%;border-collapse:collapse;'>
+    <thead><tr>{_thl('상품')}{_th('순판매')}{_th('순매출')}{_th('취소')}{_th('반품')}{_th('교환')}</tr></thead>
+    <tbody>{_rows_html}</tbody></table></div>
+    """, unsafe_allow_html=True)
+    st.caption("순판매·순매출은 취소·반품 제외(교환은 매출 유지로 포함). 취소/반품/교환 수치는 API 연동 플랫폼(Cafe24·무신사·지그재그·스마트스토어)만 정확히 집계됩니다.")
+
+    st.markdown("---")
+    chart_container("🏬 채널별(플랫폼) 매출", f"{pf_preset} · 어느 채널이 잘 파는지")
 
     # ── KPI 카드 ──────────────────────────────────────────────────
     total_sales   = int(pf_normal["판매가"].sum())
