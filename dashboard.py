@@ -3247,7 +3247,34 @@ with tab2:
                 f"{'1위 집중도가 높음 — 해당 상품 재고 관리를 최우선으로 하고, 유사 스타일 신상품 입점을 통해 의존도 분산 필요.' if top1_share >= 40 else '매출이 여러 상품에 분산되어 있음 — 안정적인 구조. 베스트 상품군 중심으로 광고 소재 제작 시 전환율 개선 효과 기대.'}"
             )
 
-        # ⑤ 액션플랜
+        # ⑤ 채널×상품 궁합 — 특정 플랫폼에서 반복 판매되는 상품 신호
+        try:
+            import re as _re3
+            def _base(nm):
+                n = _re3.sub(r'\[[^\]]*\]', ' ', str(nm))
+                n = _re3.sub(r'\([^)]*\)', ' ', n)
+                return _re3.sub(r'\s+', ' ', n).strip()
+            _cp = pf_normal.copy()
+            # 자사몰(Cafe24) 제외 — 자사몰이 베스트셀러 파는 건 궁합 발견이 아님. 마켓플레이스 궁합만.
+            _cp = _cp[_cp["플랫폼"] != "Cafe24"]
+            _cp["_상품"] = _cp["상품명"].apply(_base)
+            _combo = _cp.groupby(["플랫폼","_상품"]).size().reset_index(name="건수")
+            # 한 마켓플레이스에서 2건 이상 반복 판매된 (채널,상품) 조합
+            _repeat = _combo[_combo["건수"] >= 2].sort_values("건수", ascending=False)
+            if not _repeat.empty:
+                _lines = []
+                for _, _rw in _repeat.head(5).iterrows():
+                    _lines.append(f"· <b>{_rw['플랫폼']} × {_rw['_상품'][:22]}</b> — {int(_rw['건수'])}건 반복")
+                insights.append(
+                    "**🔗 채널×상품 궁합 신호 (마켓플레이스)**\n"
+                    "자사몰 밖 채널에서 같은 상품이 반복 판매되면, 그 채널·상품 궁합이 검증된 것. "
+                    "해당 채널에 그 상품군 노출·기획전·재고를 강화할 만함.\n"
+                    + "\n".join(_lines)
+                )
+        except Exception:
+            pass
+
+        # ⑥ 액션플랜
         insights.append(
             f"**🎯 다음 스텝 액션플랜**\n"
             f"① 수익률 {p_rate}% {'→ 고마진 상품 추가 등록으로 70%대 목표.' if p_rate < 70 else '유지 — OK.'} "
