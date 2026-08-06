@@ -2616,7 +2616,7 @@ with tab1:
     # 상품 페이지별 전환율 섹션
     # ════════════════════════════════════════════════════════════
     st.markdown("---")
-    chart_container("🛍️ 상품 페이지별 유입 vs 전환율", "어느 상품에서 이탈이 많은지 — GA4 페이지 경로 기준")
+    chart_container("🛍️ 상품 페이지별 조회 vs 이탈률", "어느 상품이 관심 많은데 상세페이지에서 놓치는지 — GA4 상품 제목 기준")
 
     @st.cache_data(ttl=3600)
     def load_product_page_stats(days: int = 14):
@@ -2629,43 +2629,41 @@ with tab1:
             ga4   = BetaAnalyticsDataClient(credentials=creds)
             end   = date.today() - timedelta(days=1)
             start = end - timedelta(days=days - 1)
+            # Cafe24는 모든 상품이 /product/detail.html 한 경로 → pageTitle로 상품 구분
             res = ga4.run_report(RunReportRequest(
                 property=f"properties/{GA4_PROPERTY_ID}",
-                dimensions=[Dimension(name="pagePath")],
+                dimensions=[Dimension(name="pageTitle")],
                 metrics=[
                     Metric(name="screenPageViews"),
                     Metric(name="bounceRate"),
-                    Metric(name="conversions"),
                     Metric(name="averageSessionDuration"),
                 ],
                 date_ranges=[DateRange(
                     start_date=start.strftime("%Y-%m-%d"),
                     end_date=end.strftime("%Y-%m-%d"),
                 )],
+                dimension_filter=FilterExpression(filter=Filter(
+                    field_name="pagePath",
+                    string_filter=Filter.StringFilter(value="/product/detail", match_type="CONTAINS"))),
                 order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="screenPageViews"), desc=True)],
-                limit=50,
+                limit=30,
             ))
             rows = []
             for row in res.rows:
-                path = row.dimension_values[0].value
-                if not any(kw in path for kw in ["/product/", "/goods/", "/item/"]):
+                title = row.dimension_values[0].value
+                # " - Nominical" 접미사 제거
+                name = title.replace(" - Nominical", "").strip()
+                if not name or name in ("Nominical", "NOMINICAL"):
                     continue
-                views   = int(row.metric_values[0].value)
-                bounce  = round(float(row.metric_values[1].value) * 100, 1)
-                conv    = int(float(row.metric_values[2].value))
-                dur     = int(float(row.metric_values[3].value))
-                cvr     = round(conv / views * 100, 2) if views > 0 else 0
-                # 경로에서 상품명 추출 (Cafe24: /product/상품명/코드/)
-                parts = [p for p in path.split("/") if p]
-                name  = parts[1] if len(parts) >= 2 else path
-                name  = name.replace("-", " ").replace("%20", " ")[:40]
+                views  = int(row.metric_values[0].value)
+                bounce = round(float(row.metric_values[1].value) * 100, 1)
+                dur    = int(float(row.metric_values[2].value))
+                if views < 10:   # 조회 10회 미만은 노이즈 제외
+                    continue
                 rows.append({
                     "상품명": name,
-                    "경로": path,
                     "조회수": views,
                     "이탈률(%)": bounce,
-                    "전환수": conv,
-                    "전환율(%)": cvr,
                     "평균체류(초)": dur,
                 })
             import pandas as _pd
@@ -2675,7 +2673,7 @@ with tab1:
 
     _pp_col1, _pp_col2 = st.columns([1, 5])
     with _pp_col1:
-        _pp_days = st.selectbox("기간", [7, 14, 30], format_func=lambda x: f"최근 {x}일",
+        _pp_days = st.selectbox("기간", [14, 7, 30], format_func=lambda x: f"최근 {x}일",
                                 key="pp_days_sel", label_visibility="collapsed")
 
     df_pp, _pp_err = load_product_page_stats(_pp_days)
@@ -2683,68 +2681,52 @@ with tab1:
     if _pp_err:
         st.warning(f"데이터 로드 실패: {_pp_err}")
     elif df_pp is None or df_pp.empty:
-        st.info("상품 페이지 방문 데이터가 없어요. GA4에 `/product/` 경로 데이터가 쌓이면 자동으로 표시됩니다.")
+        st.info("상품 페이지 방문 데이터가 없어요.")
     else:
-        # 차트: 상품별 전환율 가로 막대 (조회수 많은 순 정렬, 색=이탈률)
+        # 차트: 상품별 조회수 가로 막대 (색 = 이탈률). 전환수는 GA4가 페이지에 못 붙여 제외.
         import plotly.graph_objects as _go
         _dfc = df_pp.sort_values("조회수", ascending=True).copy()   # 아래→위 조회수 증가
         def _bar_color(b):
-            if b >= 70: return "#E74C3C"   # 이탈률 높음 = 빨강
-            if b >= 50: return "#F39C12"   # 보통 = 주황
+            if b >= 60: return "#E74C3C"   # 이탈 높음 = 빨강
+            if b >= 40: return "#F39C12"   # 보통 = 주황
             return "#27AE60"               # 낮음 = 초록
         _colors = [_bar_color(b) for b in _dfc["이탈률(%)"]]
-        _labels = [f"{n[:22]} · 조회 {int(v):,}" for n, v in zip(_dfc["상품명"], _dfc["조회수"])]
-        _avg_cvr = round(df_pp["전환율(%)"].mean(), 2)
 
         _fig_pp = _go.Figure()
         _fig_pp.add_trace(_go.Bar(
-            y=_labels, x=_dfc["전환율(%)"], orientation="h",
+            y=[n[:26] for n in _dfc["상품명"]], x=_dfc["조회수"], orientation="h",
             marker_color=_colors,
-            text=[f"{c:.1f}%" for c in _dfc["전환율(%)"]],
+            text=[f"{int(v):,}회 · 이탈 {b:.0f}%" for v, b in zip(_dfc["조회수"], _dfc["이탈률(%)"])],
             textposition="outside",
-            hovertext=[f"조회 {int(v):,} · 전환 {int(cv)}건 · 이탈률 {b:.0f}%"
-                       for v, cv, b in zip(_dfc["조회수"], _dfc["전환수"], _dfc["이탈률(%)"])],
-            hoverinfo="text",
+            hoverinfo="skip",
         ))
-        _fig_pp.add_vline(x=_avg_cvr, line_dash="dot", line_color="#8C8C8C",
-                          annotation_text=f"평균 {_avg_cvr}%", annotation_position="top")
         _fig_pp.update_layout(
-            height=max(300, 40 * len(_dfc) + 80),
+            height=max(300, 34 * len(_dfc) + 80),
             plot_bgcolor="white", paper_bgcolor="white",
-            margin=dict(l=10, r=40, t=30, b=10),
-            xaxis_title="전환율 (%)", yaxis_title=None,
+            margin=dict(l=10, r=90, t=20, b=10),
+            xaxis_title="페이지 조회수", yaxis_title=None,
             font=dict(family="Pretendard, sans-serif", size=12),
             showlegend=False,
         )
         st.plotly_chart(_fig_pp, use_container_width=True)
-        st.caption("막대 길수록 전환율 높음(잘 팔림). 🔴빨강=이탈률 70%↑ / 🟠주황=50~70% / 🟢초록=양호. "
-                   "**조회는 많은데 막대가 짧고 빨간 상품**이 상세페이지 개선 1순위예요.")
+        st.caption("막대 길이 = 조회수(관심). 막대 색 = 이탈률 → 🔴빨강 60%↑ / 🟠주황 40~60% / 🟢초록 양호. "
+                   "**막대 길고(조회 많음) 빨간(이탈 높음) 상품**이 상세페이지 개선 1순위. "
+                   "※ 전환수는 GA4가 상품 페이지 단위로 집계하지 못해 제외했어요.")
 
         # 테이블
-        _df_pp_disp = df_pp[["상품명","조회수","이탈률(%)","전환수","전환율(%)","평균체류(초)"]].copy()
-        _df_pp_disp = _df_pp_disp.sort_values("조회수", ascending=False).reset_index(drop=True)
-
+        _df_pp_disp = df_pp[["상품명","조회수","이탈률(%)","평균체류(초)"]].sort_values("조회수", ascending=False).reset_index(drop=True)
         def _color_bounce(val):
-            if val >= 70: return "color:#E74C3C;font-weight:700"
-            if val >= 50: return "color:#F39C12;font-weight:600"
+            if val >= 60: return "color:#E74C3C;font-weight:700"
+            if val >= 40: return "color:#F39C12;font-weight:600"
             return "color:#27AE60"
-
-        def _color_cvr(val):
-            if val >= 3: return "color:#27AE60;font-weight:700"
-            if val >= 1: return "color:#F39C12"
-            return "color:#E74C3C;font-weight:700"
-
         rows_html = ""
         for _, r in _df_pp_disp.iterrows():
             _bc = _color_bounce(r["이탈률(%)"])
-            _cc = _color_cvr(r["전환율(%)"])
             rows_html += (
                 f"<tr>"
-                f"<td style='padding:7px 10px;font-size:12px;max-width:220px;overflow:hidden;'>{r['상품명']}</td>"
-                f"<td style='padding:7px 10px;text-align:right;'>{r['조회수']:,}</td>"
+                f"<td style='padding:7px 10px;font-size:12px;max-width:260px;overflow:hidden;'>{r['상품명']}</td>"
+                f"<td style='padding:7px 10px;text-align:right;font-weight:700;'>{r['조회수']:,}</td>"
                 f"<td style='padding:7px 10px;text-align:right;{_bc}'>{r['이탈률(%)']:.1f}%</td>"
-                f"<td style='padding:7px 10px;text-align:right;'>{int(r['전환수'])}</td>"
-                f"<td style='padding:7px 10px;text-align:right;{_cc}'>{r['전환율(%)']:.2f}%</td>"
                 f"<td style='padding:7px 10px;text-align:right;color:#8C8C8C;'>{int(r['평균체류(초)'])}초</td>"
                 f"</tr>"
             )
@@ -2754,36 +2736,27 @@ with tab1:
 <th style='padding:8px 10px;text-align:left;'>상품명</th>
 <th style='padding:8px 10px;text-align:right;'>조회수</th>
 <th style='padding:8px 10px;text-align:right;'>이탈률</th>
-<th style='padding:8px 10px;text-align:right;'>전환수</th>
-<th style='padding:8px 10px;text-align:right;'>전환율</th>
 <th style='padding:8px 10px;text-align:right;'>평균체류</th>
 </tr></thead>
 <tbody>{rows_html}</tbody>
 </table>""", unsafe_allow_html=True)
 
-        # 인사이트
-        _high_bounce = df_pp[df_pp["이탈률(%)"] >= 70].sort_values("조회수", ascending=False)
-        _low_cvr     = df_pp[(df_pp["전환율(%)"] < 1) & (df_pp["조회수"] >= 30)].sort_values("조회수", ascending=False)
+        # 인사이트 — 조회 많은데 이탈 높은 상품 = 상세페이지 개선 1순위
+        _prob = df_pp[(df_pp["이탈률(%)"] >= 55) & (df_pp["조회수"] >= 50)].sort_values("조회수", ascending=False)
+        _good = df_pp[(df_pp["이탈률(%)"] < 40) & (df_pp["조회수"] >= 30)].sort_values("조회수", ascending=False)
         _pp_lines = []
-        if not _high_bounce.empty:
-            top = _high_bounce.iloc[0]
+        if not _prob.empty:
+            _t = _prob.iloc[0]
             _pp_lines.append(
-                f"⚠️ <b>이탈률 70% 이상 상품 {len(_high_bounce)}개</b> — "
-                f"'{top['상품명']}' 조회수 {top['조회수']:,}회·이탈률 {top['이탈률(%)']:.0f}%. "
-                f"착용샷·리뷰·가격 설득력 점검 필요."
+                f"⚠️ <b>조회 많은데 이탈 높은 상품 {len(_prob)}개</b> — "
+                f"'{_t['상품명'][:24]}' 조회 {int(_t['조회수']):,}회인데 이탈률 {_t['이탈률(%)']:.0f}%. "
+                f"관심은 큰데 상세페이지에서 놓치는 중 → 착용샷·리뷰·첫 문장 점검 1순위."
             )
-        if not _low_cvr.empty:
-            top2 = _low_cvr.iloc[0]
+        if not _good.empty:
+            _g = _good.iloc[0]
             _pp_lines.append(
-                f"💡 <b>조회수 있으나 전환율 1% 미만 상품 {len(_low_cvr)}개</b> — "
-                f"'{top2['상품명']}' {top2['조회수']:,}회 방문 중 전환 {int(top2['전환수'])}건. "
-                f"상세페이지 개선 우선순위 상품."
-            )
-        best = df_pp.sort_values("전환율(%)", ascending=False).iloc[0]
-        if best["전환율(%)"] > 0:
-            _pp_lines.append(
-                f"✅ <b>전환율 1위</b>: '{best['상품명']}' — {best['전환율(%)']:.2f}% "
-                f"(조회 {best['조회수']:,}회·전환 {int(best['전환수'])}건). 이 상품 광고 소재 우선 활용."
+                f"✅ <b>이탈 낮은 우량 상품</b>: '{_g['상품명'][:24]}' 이탈률 {_g['이탈률(%)']:.0f}% · 평균체류 {int(_g['평균체류(초)'])}초. "
+                f"상세페이지가 잘 잡아둠 — 이 상품에 광고 유입을 더 태울 만함."
             )
         if _pp_lines:
             st.markdown("<br>", unsafe_allow_html=True)
