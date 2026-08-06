@@ -2685,27 +2685,40 @@ with tab1:
     elif df_pp is None or df_pp.empty:
         st.info("상품 페이지 방문 데이터가 없어요. GA4에 `/product/` 경로 데이터가 쌓이면 자동으로 표시됩니다.")
     else:
-        # 차트: 조회수 vs 전환율 산점도
-        import plotly.express as _px
-        _fig_pp = _px.scatter(
-            df_pp,
-            x="조회수", y="전환율(%)",
-            size="조회수", color="이탈률(%)",
-            hover_name="상품명",
-            hover_data={"전환수": True, "평균체류(초)": True, "경로": False},
-            color_continuous_scale=[[0, "#27AE60"], [0.5, "#F39C12"], [1, "#E74C3C"]],
-            labels={"조회수": "페이지 조회수", "전환율(%)": "전환율 (%)"},
-            height=380,
-        )
+        # 차트: 상품별 전환율 가로 막대 (조회수 많은 순 정렬, 색=이탈률)
+        import plotly.graph_objects as _go
+        _dfc = df_pp.sort_values("조회수", ascending=True).copy()   # 아래→위 조회수 증가
+        def _bar_color(b):
+            if b >= 70: return "#E74C3C"   # 이탈률 높음 = 빨강
+            if b >= 50: return "#F39C12"   # 보통 = 주황
+            return "#27AE60"               # 낮음 = 초록
+        _colors = [_bar_color(b) for b in _dfc["이탈률(%)"]]
+        _labels = [f"{n[:22]} · 조회 {int(v):,}" for n, v in zip(_dfc["상품명"], _dfc["조회수"])]
+        _avg_cvr = round(df_pp["전환율(%)"].mean(), 2)
+
+        _fig_pp = _go.Figure()
+        _fig_pp.add_trace(_go.Bar(
+            y=_labels, x=_dfc["전환율(%)"], orientation="h",
+            marker_color=_colors,
+            text=[f"{c:.1f}%" for c in _dfc["전환율(%)"]],
+            textposition="outside",
+            hovertext=[f"조회 {int(v):,} · 전환 {int(cv)}건 · 이탈률 {b:.0f}%"
+                       for v, cv, b in zip(_dfc["조회수"], _dfc["전환수"], _dfc["이탈률(%)"])],
+            hoverinfo="text",
+        ))
+        _fig_pp.add_vline(x=_avg_cvr, line_dash="dot", line_color="#8C8C8C",
+                          annotation_text=f"평균 {_avg_cvr}%", annotation_position="top")
         _fig_pp.update_layout(
+            height=max(300, 40 * len(_dfc) + 80),
             plot_bgcolor="white", paper_bgcolor="white",
-            margin=dict(l=10, r=10, t=20, b=10),
-            coloraxis_colorbar=dict(title="이탈률%", thickness=12),
+            margin=dict(l=10, r=40, t=30, b=10),
+            xaxis_title="전환율 (%)", yaxis_title=None,
             font=dict(family="Pretendard, sans-serif", size=12),
+            showlegend=False,
         )
-        _fig_pp.add_hline(y=df_pp["전환율(%)"].mean(), line_dash="dot",
-                          line_color="#8C8C8C", annotation_text="평균 전환율")
         st.plotly_chart(_fig_pp, use_container_width=True)
+        st.caption("막대 길수록 전환율 높음(잘 팔림). 🔴빨강=이탈률 70%↑ / 🟠주황=50~70% / 🟢초록=양호. "
+                   "**조회는 많은데 막대가 짧고 빨간 상품**이 상세페이지 개선 1순위예요.")
 
         # 테이블
         _df_pp_disp = df_pp[["상품명","조회수","이탈률(%)","전환수","전환율(%)","평균체류(초)"]].copy()
