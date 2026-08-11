@@ -638,7 +638,7 @@ def load_meta_daily_creative(date_preset="last_30d"):
 # ── Instagram 계정 설정 ───────────────────────────────────────────────
 IG_ACCOUNTS = {
     "beeunkim (개인)": {
-        "token": "IGAAfKtJZBiU09BZAFkyY3V3TUxXMFY1V1A1cHdiRXljMjV0LTQ5TmZA4RnUtODhSaVhIT0pPQXY1a3pNNk9NVWRoR3BUUnJITG1OTUUySjVicHZAMUDZAVN18wQ1hRQTJSMVpPdmJVRUdHelpMRkpqQkpJRHlFN2ZAzdDZA1ckRCaGlGcwZDZD",
+        "token": "IGAAfKtJZBiU09BZAFlCaGlVamtKc29sYWVGLUx5aHF4dmt6TEpDYjNiaEZANQVZAzQ3VjX0ZA6dEdLUWFScXBRNnpkbm5Qd0VyYkFPSTdFbXRnVlRTVlU4a1dWY2N0UG03TGRVSVpSa1VqQThUNG41alhFUDFtVDZAGOWQwNVpPY3FucwZDZD",
         "ig_id": "17841401409070018",
         "color": "#C13584",
     },
