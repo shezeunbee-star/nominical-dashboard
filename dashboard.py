@@ -436,7 +436,22 @@ def load_meta_ad_insights(date_preset="last_30d"):
 
         df_ads = pd.DataFrame(rows)
 
-        # ② 썸네일 가져오기 (상위 20개 광고)
+        # ② 소재별 현재 상태(ACTIVE/PAUSED) 일괄 조회 — 꺼진/삭제 소재 필터용
+        status_map = {}
+        try:
+            _sr = _requests.get(
+                f"https://graph.facebook.com/v25.0/{AD_ACCOUNT}/ads",
+                params={"fields": "id,effective_status", "limit": 200, "access_token": meta_token},
+                timeout=15,
+            ).json()
+            for _a in _sr.get("data", []):
+                status_map[_a.get("id")] = _a.get("effective_status", "")
+        except Exception:
+            pass
+        # 상태 조회에 없는 ad_id(삭제됨)는 DELETED로 간주
+        df_ads["상태"] = df_ads["ad_id"].map(lambda x: status_map.get(x, "DELETED"))
+
+        # ③ 썸네일 가져오기 (상위 20개 광고)
         thumbnails = {}
         for ad_id in ad_ids[:20]:
             try:
@@ -1870,24 +1885,73 @@ with tab1:
     with c5: kpi_card("평균 CPO", f"{avg_cpo:,}원" if avg_cpo else "—", f"전환일 {len(conv_days)}일")
     with c6: kpi_card("신규방문 비율", f"{avg_new_rate}%", f"재방문 {100-avg_new_rate}%")
 
-    # ── KPI 인사이트 ──────────────────────────────────────────────
+    # ── KPI 인사이트 — 병목 진단 + 구체 액션 ─────────────────────
     _kpi_lines = []
+
+    # 7일 델타
+    _vis_drop = _sp = None
+    _conv_delta = 0
     if len(prior) > 0 and prior["방문자"].sum() > 0:
-        _v  = round((recent["방문자"].sum() - prior["방문자"].sum()) / prior["방문자"].sum() * 100)
-        _sp = round((recent["광고비"].sum()  - prior["광고비"].sum())  / prior["광고비"].sum()  * 100) if prior["광고비"].sum() > 0 else None
-        _c  = int(recent["구매"].sum() - prior["구매"].sum())
-        _vc = f"<b style='color:{'#27AE60' if _v>=0 else '#E74C3C'}'>{'▲' if _v>=0 else '▼'}{abs(_v)}%</b>"
-        _sc = (f"<b style='color:{'#E74C3C' if _sp>=0 else '#27AE60'}'>{'▲' if _sp>=0 else '▼'}{abs(_sp)}%</b>") if _sp is not None else "—"
-        _cc = f"<b style='color:{'#27AE60' if _c>=0 else '#E74C3C'}'>{'▲' if _c>=0 else '▼'}{abs(_c)}건</b>"
-        _kpi_lines.append(f"📊 <b>지난 7일 vs 이전 7일</b> — 방문자 {_vc} · 광고비 {_sc} · 전환 {_cc}")
-    _nr_msg = "신규 비중이 높아 재방문 리타게팅 여지 큼." if avg_new_rate >= 70 else "재방문 비중이 올라오고 있음 — 구매 결정 장벽(가격·배송비·리뷰) 점검 권장."
-    _kpi_lines.append(f"👥 신규 <b>{avg_new_rate}%</b> / 재방문 <b>{100-avg_new_rate}%</b> — {_nr_msg}")
+        _vis_drop   = round((recent["방문자"].sum() - prior["방문자"].sum()) / prior["방문자"].sum() * 100)
+        _sp         = round((recent["광고비"].sum() - prior["광고비"].sum()) / prior["광고비"].sum() * 100) if prior["광고비"].sum() > 0 else None
+        _conv_delta = int(recent["구매"].sum() - prior["구매"].sum())
+
+    # ① 유입 진단 — 무슨 일이 났고 뭘 할지
+    if _vis_drop is not None:
+        if _vis_drop <= -12:
+            _kpi_lines.append(
+                f"📉 <b>유입 {abs(_vis_drop)}% 감소</b> (7일 전 대비) — 방문자의 대부분이 광고예요. "
+                f"유입이 줄었다면 <b>광고 노출이 줄어든 것</b>(소재·오디언스 소진). "
+                f"→ <b>3개월 이상 된 소재는 교체</b>하고, 새 소재는 <b>별도 캠페인(세트별 예산)</b>으로 테스트해야 노출이 회복돼요. 예산 증액보다 소재 교체가 먼저."
+            )
+        elif _vis_drop >= 12:
+            _kpi_lines.append(
+                f"📈 <b>유입 {_vis_drop}% 회복</b> — 새 소재/오가닉이 먹히는 중. "
+                f"이 흐름에서 <b>전환율만 잡으면</b> 바로 매출로 이어져요. (아래 전환 항목 참고)"
+            )
+        else:
+            _kpi_lines.append(f"➡️ 유입 유지 (7일 전 대비 {'+' if _vis_drop>=0 else ''}{_vis_drop}%) — 방문자는 안정적. 병목은 전환 쪽.")
+
+    # ② 전환 병목 — 유입은 있는데 왜 안 사나
+    if total_visitors > 0:
+        _cvr = overall_cvr
+        _per1k = round(_cvr * 10, 1)
+        if _cvr < 1.2:
+            _kpi_lines.append(
+                f"🎯 <b>전환율 {_cvr}%</b> (방문 1,000명당 {_per1k}건) — <b>유입은 있는데 상세에서 놓쳐요.</b> "
+                f"신규 <b>{avg_new_rate}%</b>라 첫 방문자가 대부분 — 이들에게 <b>①상세 상단 신규 할인가 노출(예: 89,000→79,000) ②리뷰 확보</b>가 광고 늘리는 것보다 직접적이에요. "
+                f"이게 지금 매출의 진짜 레버."
+            )
+        else:
+            _kpi_lines.append(
+                f"🎯 전환율 <b>{_cvr}%</b> — 준수한 편. 유입만 회복하면 매출이 따라와요. 전환은 유지하고 <b>유입(소재 교체)</b>에 집중."
+            )
+
+    # ③ ROAS — 증액 판단을 숫자로
     if total_spend > 0:
         _rc = "#27AE60" if overall_roas >= 3 else ("#F39C12" if overall_roas >= 1.5 else "#E74C3C")
-        _rm = ("목표 ROAS 달성 — 예산 증액 검토 가능." if overall_roas >= 3
-               else "손익분기 근접 — 소재·타겟 최적화 후 증액 판단." if overall_roas >= 1.5
-               else "ROAS 1.5 미달 — 현 세팅으로 증액 시 손실. 타겟·소재 전면 점검 필요.")
-        _kpi_lines.append(f"💰 ROAS <b style='color:{_rc}'>{overall_roas}배</b> — {_rm}")
+        if overall_roas < 1.5:
+            # 전환율을 목표까지 올리면 ROAS가 얼마나 오르는지 역산
+            _target_cvr = 1.5
+            _mult = round(_target_cvr / overall_cvr, 1) if overall_cvr > 0 else None
+            _proj = round(overall_roas * _mult, 1) if _mult else None
+            _extra = (f" 전환율을 {overall_cvr}%→1.5%로만 올려도 ROAS가 <b>~{_proj}배</b>로 올라 증액 가능해져요."
+                      if _proj else "")
+            _kpi_lines.append(
+                f"💰 <b style='color:{_rc}'>ROAS {overall_roas}배</b> — 지금 <b>증액하면 손실</b>이에요. "
+                f"근데 문제는 광고 효율이 아니라 <b>전환</b>이에요.{_extra} "
+                f"→ 광고는 <b>소재 교체만</b>, 예산은 상세·할인으로 전환 잡은 뒤에 늘리세요."
+            )
+        elif overall_roas >= 3:
+            _kpi_lines.append(
+                f"💰 <b style='color:{_rc}'>ROAS {overall_roas}배</b> — 목표 달성, <b>증액 여력 있음</b>. "
+                f"단 소재 피로 오면 노출 떨어지니 <b>새 소재 파이프라인</b>은 계속 돌리세요."
+            )
+        else:
+            _kpi_lines.append(
+                f"💰 <b style='color:{_rc}'>ROAS {overall_roas}배</b> — 손익분기 근처. "
+                f"에이스 소재는 유지하고, <b>전환율(상세·리뷰)</b> 개선으로 3배 위로 올린 뒤 증액 판단."
+            )
     insight_box(_kpi_lines, COLOR["blue"])
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -2545,7 +2609,12 @@ with tab1:
 
         # ── 전체 소재 상세 지표 테이블 (썸네일 인라인) ─────────────
         st.markdown("<br>", unsafe_allow_html=True)
-        chart_container("전체 소재 상세 지표", "라이브 중인 모든 소재 — 캠페인 > 광고세트 > 소재명")
+        chart_container("전체 소재 상세 지표", "캠페인 > 광고세트 > 소재명")
+
+        # 라이브 소재만 보기 (꺼진/삭제 소재 숨김)
+        _live_only = st.checkbox("라이브 소재만 보기 (꺼진·삭제 소재 숨김)", value=True, key="ad_live_only")
+        if _live_only and "상태" in df_ads.columns:
+            df_ads = df_ads[df_ads["상태"] == "ACTIVE"].reset_index(drop=True)
 
         _thumb_map = dict(zip(df_ads["ad_id"], df_ads["thumbnail"]))
 
