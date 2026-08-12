@@ -208,6 +208,19 @@ def _refresh_creds(creds):
             _time.sleep(2 ** _attempt)
 
 
+def _open_ws(gc, sheet_name):
+    """구글 시트 워크시트 열기 — 일시 오류(500/503/네트워크) 시 3회 재시도."""
+    import time as _time
+    last = None
+    for _attempt in range(3):
+        try:
+            return gc.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
+        except Exception as _e:
+            last = _e
+            _time.sleep(2 * (_attempt + 1))
+    raise last
+
+
 # ── 데이터 로드: 방문자/광고 ────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_data():
@@ -227,7 +240,7 @@ def load_data():
             _refresh_creds(creds)
 
     gc = gspread.authorize(creds)
-    ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+    ws = _open_ws(gc, SHEET_NAME)
     raw = ws.get("A2:X200", value_render_option="UNFORMATTED_VALUE")
 
     headers = raw[0]
@@ -734,7 +747,7 @@ def load_platform_data():
             _refresh_creds(creds)
 
     gc = gspread.authorize(creds)
-    ws = gc.open_by_key(SPREADSHEET_ID).worksheet(PLATFORM_SHEET_NAME)
+    ws = _open_ws(gc, PLATFORM_SHEET_NAME)
     raw = ws.get_all_values()
 
     if len(raw) <= 1:
@@ -972,7 +985,7 @@ def update_ga4_yesterday():
         creds           = _get_oauth_creds()   # OAuth: Sheets + GA4 동시 접근
         ga4             = BetaAnalyticsDataClient(credentials=creds)
         gc              = gspread.authorize(creds)
-        ws              = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        ws              = _open_ws(gc, SHEET_NAME)
 
         yesterday = date.today() - timedelta(days=1)
         date_str  = yesterday.strftime("%Y-%m-%d")
@@ -1078,7 +1091,7 @@ def update_ga4_for_date(target_date):
         creds           = _get_oauth_creds()
         ga4             = BetaAnalyticsDataClient(credentials=creds)
         gc              = gspread.authorize(creds)
-        ws              = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        ws              = _open_ws(gc, SHEET_NAME)
 
         # target_date가 date 객체가 아니면 변환
         if isinstance(target_date, str):
@@ -1191,7 +1204,7 @@ def get_last_data_date():
     from datetime import date
     try:
         gc = gspread.authorize(_get_oauth_creds())
-        ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        ws = _open_ws(gc, SHEET_NAME)
         all_dates = ws.col_values(1)
 
         for d in reversed(all_dates[1:]):  # 헤더 제외
@@ -1217,7 +1230,7 @@ def add_empty_rows_for_gaps():
 
     try:
         gc = gspread.authorize(_get_oauth_creds())
-        ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        ws = _open_ws(gc, SHEET_NAME)
         all_dates = ws.col_values(1)
 
         print("\n🔍 갭이 있는지 확인 중...")
@@ -1331,7 +1344,7 @@ def update_meta_for_date(target_date):
 
         creds = _get_oauth_creds()
         gc    = gspread.authorize(creds)
-        ws    = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        ws    = _open_ws(gc, SHEET_NAME)
 
         # target_date가 date 객체가 아니면 변환
         if isinstance(target_date, str):
@@ -1397,7 +1410,7 @@ def fill_missing_dates():
     try:
         creds = _get_oauth_creds()
         gc = gspread.authorize(creds)
-        ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        ws = _open_ws(gc, SHEET_NAME)
 
         yesterday = date.today() - timedelta(days=1)
 
@@ -1619,7 +1632,7 @@ def update_cafe24_yesterday():
         # ── 시트에 추가 ──────────────────────────────────────────
         creds = _get_sheet_creds()
         gc    = gspread.authorize(creds)
-        ws    = gc.open_by_key(SPREADSHEET_ID).worksheet(PLATFORM_SHEET_NAME)
+        ws    = _open_ws(gc, PLATFORM_SHEET_NAME)
 
         existing_raw = ws.get_all_values()
         existing_keys = set()
