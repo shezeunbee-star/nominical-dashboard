@@ -56,6 +56,14 @@ CHANNEL_COLORS = {
     "개인인스타": "#F56040",
 }
 
+# 상태색 — UI 신호등/인사이트 전용 (차트 데이터 시리즈 색과 별개)
+STATUS = {
+    "crit": {"fg": "#D63B3B", "bg": "#FBEDED", "bd": "#F0C9C9"},
+    "warn": {"fg": "#C98A16", "bg": "#FBF3E4", "bd": "#EAD8AE"},
+    "good": {"fg": "#2E8B57", "bg": "#EAF3EC", "bd": "#BEDCC6"},
+    "info": {"fg": "#5A5754", "bg": "#F1EFEC", "bd": "#DBD8D3"},
+}
+
 PLATFORM_COLORS = {
     "29CM":       "#E94B3C",   # 레드
     "W컨셉":      "#5B3F9E",   # 딥 퍼플
@@ -193,6 +201,45 @@ def chart_container(title, subtitle=""):
     st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
     if subtitle:
         st.markdown(f'<div class="section-sub">{subtitle}</div>', unsafe_allow_html=True)
+
+def section_title(title, sub=""):
+    """중제목 — 차트 그룹 구분 (막대바 + 16px)"""
+    sub_html = (f'<div style="font-size:12.5px;color:#8C8A86;margin:2px 0 14px 13px;">{sub}</div>'
+                if sub else '<div style="margin-bottom:10px;"></div>')
+    st.markdown(
+        f'<div style="display:flex;align-items:center;gap:9px;margin:34px 0 0;">'
+        f'<span style="width:3px;height:16px;background:#1A1A1A;border-radius:2px;display:inline-block;"></span>'
+        f'<span style="font-size:16px;font-weight:700;letter-spacing:-0.01em;color:#1A1A1A;">{title}</span>'
+        f'</div>{sub_html}', unsafe_allow_html=True)
+
+def render_action_panel(tiers, note=""):
+    """상단 통합 액션 패널 — tiers: {'crit':[...], 'warn':[...], 'good':[...]} 각 항목 (제목, 근거)"""
+    _tier_meta = [("crit", "지금 할 것"), ("warn", "지켜볼 것"), ("good", "잘 되는 것")]
+    rows = ""
+    first = True
+    for key, label in _tier_meta:
+        items = tiers.get(key, [])
+        if not items:
+            continue
+        fg = STATUS[key]["fg"]
+        _lis = []
+        for t, w in items:
+            why = f' — <span style="color:#8C8A86;font-size:12.5px;">{w}</span>' if w else ""
+            _lis.append(f'<div style="font-size:13.5px;color:#1A1A1A;line-height:1.45;margin-bottom:7px;"><b>{t}</b>{why}</div>')
+        lis = "".join(_lis)
+        border = "" if first else "border-top:1px solid #EDEBE8;"
+        first = False
+        rows += (
+            f'<div style="display:grid;grid-template-columns:118px 1fr;gap:16px;padding:13px 0;{border}">'
+            f'<div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:#1A1A1A;">'
+            f'<span style="width:9px;height:9px;border-radius:50%;background:{fg};display:inline-block;"></span>{label}</div>'
+            f'<div>{lis}</div></div>')
+    note_html = f'<span style="font-size:12px;color:#8C8A86;">{note}</span>' if note else ""
+    st.markdown(
+        f'<div style="background:#FFFFFF;border:1px solid #D8D5D0;border-radius:14px;padding:20px 24px;margin:20px 0 6px;">'
+        f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px;">'
+        f'<span style="font-size:17px;font-weight:800;letter-spacing:-0.01em;color:#1A1A1A;">🎯 이번 기간 핵심 &amp; 액션</span>'
+        f'{note_html}</div>{rows}</div>', unsafe_allow_html=True)
 
 
 def _refresh_creds(creds):
@@ -1819,6 +1866,7 @@ with tab1:
     with col_f1:
         preset = st.selectbox("📅 조회 기간",
             ["전체 기간", "최근 7일", "최근 14일"] + [w for w in weeks if "주차" in w],
+            index=1,  # 기본값: 최근 7일
             label_visibility="collapsed", key="tab1_preset")
     with col_f2:
         if preset == "전체 기간":
@@ -1885,76 +1933,139 @@ with tab1:
     with c5: kpi_card("평균 CPO", f"{avg_cpo:,}원" if avg_cpo else "—", f"전환일 {len(conv_days)}일")
     with c6: kpi_card("신규방문 비율", f"{avg_new_rate}%", f"재방문 {100-avg_new_rate}%")
 
-    # ── KPI 인사이트 — 병목 진단 + 구체 액션 ─────────────────────
-    _kpi_lines = []
+    # 상품 페이지 통계 (액션 패널·상품 섹션 공용) ── pageTitle 기준
+    @st.cache_data(ttl=3600)
+    def load_product_page_stats(days: int = 14):
+        if not _GA4_AVAILABLE:
+            return None, "GA4 패키지 없음"
+        try:
+            from datetime import date, timedelta
+            GA4_PROPERTY_ID = "536368183"
+            creds = _get_oauth_creds()
+            ga4   = BetaAnalyticsDataClient(credentials=creds)
+            end   = date.today() - timedelta(days=1)
+            start = end - timedelta(days=days - 1)
+            res = ga4.run_report(RunReportRequest(
+                property=f"properties/{GA4_PROPERTY_ID}",
+                dimensions=[Dimension(name="pageTitle")],
+                metrics=[Metric(name="screenPageViews"), Metric(name="bounceRate"),
+                         Metric(name="averageSessionDuration")],
+                date_ranges=[DateRange(start_date=start.strftime("%Y-%m-%d"),
+                                       end_date=end.strftime("%Y-%m-%d"))],
+                dimension_filter=FilterExpression(filter=Filter(
+                    field_name="pagePath",
+                    string_filter=Filter.StringFilter(value="/product/detail", match_type="CONTAINS"))),
+                order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="screenPageViews"), desc=True)],
+                limit=30,
+            ))
+            rows = []
+            for row in res.rows:
+                name = row.dimension_values[0].value.replace(" - Nominical", "").strip()
+                if not name or name in ("Nominical", "NOMINICAL"):
+                    continue
+                views  = int(row.metric_values[0].value)
+                if views < 10:
+                    continue
+                rows.append({"상품명": name, "조회수": views,
+                             "이탈률(%)": round(float(row.metric_values[1].value) * 100, 1),
+                             "평균체류(초)": int(float(row.metric_values[2].value))})
+            import pandas as _pd
+            return _pd.DataFrame(rows), None
+        except Exception as e:
+            return None, str(e)
+
+    # ── 통합 액션 패널 — 트래픽 진단 + 소재 신호 자동 집계 ─────────────
+    _tiers = {"crit": [], "warn": [], "good": []}
+    BE_ROAS = 1.8  # 손익분기 ROAS (마진 55% 가정)
 
     # 7일 델타
-    _vis_drop = _sp = None
-    _conv_delta = 0
+    _vis_drop = None
     if len(prior) > 0 and prior["방문자"].sum() > 0:
-        _vis_drop   = round((recent["방문자"].sum() - prior["방문자"].sum()) / prior["방문자"].sum() * 100)
-        _sp         = round((recent["광고비"].sum() - prior["광고비"].sum()) / prior["광고비"].sum() * 100) if prior["광고비"].sum() > 0 else None
-        _conv_delta = int(recent["구매"].sum() - prior["구매"].sum())
+        _vis_drop = round((recent["방문자"].sum() - prior["방문자"].sum()) / prior["방문자"].sum() * 100)
 
-    # ① 유입 진단 — 무슨 일이 났고 뭘 할지
-    if _vis_drop is not None:
-        if _vis_drop <= -12:
-            _kpi_lines.append(
-                f"📉 <b>유입 {abs(_vis_drop)}% 감소</b> (7일 전 대비) — 방문자의 대부분이 광고예요. "
-                f"유입이 줄었다면 <b>광고 노출이 줄어든 것</b>(소재·오디언스 소진). "
-                f"→ <b>3개월 이상 된 소재는 교체</b>하고, 새 소재는 <b>별도 캠페인(세트별 예산)</b>으로 테스트해야 노출이 회복돼요. 예산 증액보다 소재 교체가 먼저."
-            )
-        elif _vis_drop >= 12:
-            _kpi_lines.append(
-                f"📈 <b>유입 {_vis_drop}% 회복</b> — 새 소재/오가닉이 먹히는 중. "
-                f"이 흐름에서 <b>전환율만 잡으면</b> 바로 매출로 이어져요. (아래 전환 항목 참고)"
-            )
-        else:
-            _kpi_lines.append(f"➡️ 유입 유지 (7일 전 대비 {'+' if _vis_drop>=0 else ''}{_vis_drop}%) — 방문자는 안정적. 병목은 전환 쪽.")
+    # (1) 소재 신호 — 최근 7일 라이브 소재 기준
+    try:
+        _ads7 = load_meta_ad_insights("last_7d")
+        if _ads7 is not None and not _ads7.empty and "상태" in _ads7.columns:
+            _ads7 = _ads7[_ads7["상태"] == "ACTIVE"]
+    except Exception:
+        _ads7 = None
+    if _ads7 is not None and not _ads7.empty:
+        # 🔴 노출 2,000↑인데 전환 0 → 끄기
+        _dead = _ads7[(_ads7["노출수"] >= 2000) & (_ads7["전환수"] == 0)].sort_values("광고비", ascending=False)
+        for _, a in _dead.head(3).iterrows():
+            _tiers["crit"].append((f"{str(a['소재명'])[:24]} 끄기",
+                                   f"노출 {int(a['노출수']):,}인데 전환 0"))
+        # 🟢 ROAS 손익분기 이상 효자 (상위 2)
+        _win = _ads7[_ads7["ROAS"] >= BE_ROAS].sort_values("ROAS", ascending=False)
+        for _, a in _win.head(2).iterrows():
+            _tiers["good"].append((f"{str(a['소재명'])[:24]} ROAS {a['ROAS']}배",
+                                   "예산 증액 가치" if a["ROAS"] >= 3 else "수익 구간, 유지"))
+        # 🟡 전환은 있으나 ROAS<손익분기 → 관찰
+        _watch = _ads7[(_ads7["전환수"] > 0) & (_ads7["ROAS"] < BE_ROAS)].sort_values("광고비", ascending=False)
+        for _, a in _watch.head(2).iterrows():
+            _tiers["warn"].append((f"{str(a['소재명'])[:24]} 관찰",
+                                   f"ROAS {a['ROAS']}배 · 손익분기 1.8 미만"))
 
-    # ② 전환 병목 — 유입은 있는데 왜 안 사나
-    if total_visitors > 0:
-        _cvr = overall_cvr
-        _per1k = round(_cvr * 10, 1)
-        if _cvr < 1.2:
-            _kpi_lines.append(
-                f"🎯 <b>전환율 {_cvr}%</b> (방문 1,000명당 {_per1k}건) — <b>유입은 있는데 상세에서 놓쳐요.</b> "
-                f"신규 <b>{avg_new_rate}%</b>라 첫 방문자가 대부분 — 이들에게 <b>①상세 상단 신규 할인가 노출(예: 89,000→79,000) ②리뷰 확보</b>가 광고 늘리는 것보다 직접적이에요. "
-                f"이게 지금 매출의 진짜 레버."
-            )
-        else:
-            _kpi_lines.append(
-                f"🎯 전환율 <b>{_cvr}%</b> — 준수한 편. 유입만 회복하면 매출이 따라와요. 전환은 유지하고 <b>유입(소재 교체)</b>에 집중."
-            )
+    # (2) 상품 신호 — 조회 많은데 이탈 높은 상세페이지 (실제 상품명 지목)
+    _worst_pp_name = None
+    try:
+        _dfpp7, _ = load_product_page_stats(14)
+    except Exception:
+        _dfpp7 = None
+    if _dfpp7 is not None and not _dfpp7.empty:
+        # 조회 상위(관심 큼) 중 이탈률 높은 상품 = 개선 1순위
+        _cand = _dfpp7[_dfpp7["조회수"] >= max(30, _dfpp7["조회수"].quantile(0.5))]
+        _cand = _cand[_cand["이탈률(%)"] >= 55].sort_values("조회수", ascending=False)
+        if not _cand.empty:
+            _p = _cand.iloc[0]
+            _worst_pp_name = str(_p["상품명"])[:22]
+            _dur = int(_p["평균체류(초)"])
+            _is_short = _dur < 20
+            _tiers["crit" if _p["이탈률(%)"] >= 65 else "warn"].append((
+                f"{_worst_pp_name} 상세페이지 보강",
+                f"조회 {int(_p['조회수']):,}회인데 이탈 {_p['이탈률(%)']:.0f}%·체류 {_dur}초 — "
+                + ("첫 화면이 텍스트뿐일 가능성, 상단에 착용컷·사이즈표·후기 먼저 배치" if _is_short
+                   else "상단 코디컷·사이즈 가이드·리뷰 위치 점검")))
 
-    # ③ ROAS — 증액 판단을 숫자로
-    if total_spend > 0:
-        _rc = "#27AE60" if overall_roas >= 3 else ("#F39C12" if overall_roas >= 1.5 else "#E74C3C")
-        if overall_roas < 1.5:
-            # 전환율을 목표까지 올리면 ROAS가 얼마나 오르는지 역산
-            _target_cvr = 1.5
-            _mult = round(_target_cvr / overall_cvr, 1) if overall_cvr > 0 else None
-            _proj = round(overall_roas * _mult, 1) if _mult else None
-            _extra = (f" 전환율을 {overall_cvr}%→1.5%로만 올려도 ROAS가 <b>~{_proj}배</b>로 올라 증액 가능해져요."
-                      if _proj else "")
-            _kpi_lines.append(
-                f"💰 <b style='color:{_rc}'>ROAS {overall_roas}배</b> — 지금 <b>증액하면 손실</b>이에요. "
-                f"근데 문제는 광고 효율이 아니라 <b>전환</b>이에요.{_extra} "
-                f"→ 광고는 <b>소재 교체만</b>, 예산은 상세·할인으로 전환 잡은 뒤에 늘리세요."
-            )
-        elif overall_roas >= 3:
-            _kpi_lines.append(
-                f"💰 <b style='color:{_rc}'>ROAS {overall_roas}배</b> — 목표 달성, <b>증액 여력 있음</b>. "
-                f"단 소재 피로 오면 노출 떨어지니 <b>새 소재 파이프라인</b>은 계속 돌리세요."
-            )
-        else:
-            _kpi_lines.append(
-                f"💰 <b style='color:{_rc}'>ROAS {overall_roas}배</b> — 손익분기 근처. "
-                f"에이스 소재는 유지하고, <b>전환율(상세·리뷰)</b> 개선으로 3배 위로 올린 뒤 증액 판단."
-            )
-    insight_box(_kpi_lines, COLOR["blue"])
+    # (3) 채널 믹스 — 유료 의존도 상승 / 오가닉 감소 진단
+    if len(prior) > 0 and len(recent) > 0:
+        _paid_r = recent["유입_메타"].sum()
+        _org_r  = recent.get("유입_인스타오가닉", pd.Series([0])).sum() + recent["유입_공식"].sum() + recent["유입_개인"].sum()
+        _paid_p = prior["유입_메타"].sum()
+        _org_p  = prior.get("유입_인스타오가닉", pd.Series([0])).sum() + prior["유입_공식"].sum() + prior["유입_개인"].sum()
+        _share_r = _paid_r / (_paid_r + _org_r) * 100 if (_paid_r + _org_r) > 0 else 0
+        _share_p = _paid_p / (_paid_p + _org_p) * 100 if (_paid_p + _org_p) > 0 else 0
+        _org_drop = (_org_r - _org_p) / _org_p * 100 if _org_p > 0 else 0
+        if _share_r >= 65:  # 유료 의존 심화 (오가닉이 만성적으로 약함)
+            _trend = (f"직전 대비 {_share_p:.0f}%→{_share_r:.0f}%" if abs(_share_r - _share_p) >= 3
+                      else f"{_share_r:.0f}%")
+            _org_txt = (f", 오가닉 {abs(_org_drop):.0f}% 감소" if _org_drop <= -10 else ", 오가닉 저조")
+            _tiers["warn"].append((
+                "광고 의존도 심화 — 오가닉 회복",
+                f"유료 유입 비중 {_trend}{_org_txt}. 유료만 늘리면 광고비↑·CPO 악화 — "
+                "공식 인스타 릴스 주 2회 재개로 오가닉 유입 살려 광고 부담 낮추기"))
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    # (4) 전환·ROAS 진단 (기간 df 기준)
+    if total_visitors > 0 and overall_cvr < 1.2:
+        _pp_ref = f"특히 '{_worst_pp_name}'부터" if _worst_pp_name else "조회 상위 상품부터"
+        _tiers["warn"].append(("전환율 개선 — 상세페이지",
+                               f"전환율 {overall_cvr}% (방문 1,000명당 {round(overall_cvr*10,1)}건) · 신규 {avg_new_rate}% — {_pp_ref} 상단 할인가·리뷰 보강"))
+    if total_spend > 0 and overall_roas < 1.5:
+        _tiers["crit"].append(("예산 증액 보류",
+                               f"종합 ROAS {overall_roas}배 — 지금 증액은 손실. 소재 교체로 전환부터"))
+    if _vis_drop is not None and _vis_drop <= -12:
+        _tiers["crit"].append(("소재 교체 우선",
+                               f"유입 {abs(_vis_drop)}% 감소 — 오디언스·소재 소진 신호. 3개월+ 소재 교체"))
+    if not any(_tiers.values()):
+        _tiers["good"].append(("특이 신호 없음", "주요 지표 안정 구간"))
+
+    render_action_panel(
+        _tiers,
+        note=f"광고비 {total_spend:,}원 · 구매 {total_purchases}건 · 종합 ROAS {overall_roas}배")
+
+    # ── 트래픽 & 채널 ─────────────────────────────────────────────
+    section_title("트래픽 & 채널", "어디서 얼마나 들어오고, 신규가 어떻게 쌓이는지")
 
     # 차트 1: 일별 방문자 & 전환 추이
     chart_container("일별 방문자 · 전환 추이", "바이럴 스파이크, 광고 집행일, 전환 발생 패턴을 한눈에")
@@ -2135,98 +2246,9 @@ with tab1:
         tickfont=dict(size=11), anchor="x",
     ))
     st.plotly_chart(fig1, use_container_width=True)
-
-    # ── 방문자·전환 추이 인사이트 ─────────────────────────────────
-    _t1_lines = []
-    if len(df) > 1:
-        _max_day = df.loc[df["방문자"].idxmax()]
-        _avg_vis = df["방문자"].mean()
-        if _max_day["방문자"] > _avg_vis * 2:
-            _ch_map = {"메타 유료광고": _max_day["유입_메타"], "인스타그램 오가닉": _max_day.get("유입_인스타오가닉", 0),
-                       "공식인스타 바이오": _max_day["유입_공식"], "개인인스타 바이오": _max_day["유입_개인"],
-                       "직접방문": _max_day["유입_직접"]}
-            _top_ch = max(_ch_map, key=_ch_map.get)
-            _t1_lines.append(f"📈 <b>{_max_day['날짜']} 트래픽 스파이크</b> — 평균 대비 {round(_max_day['방문자']/_avg_vis,1)}배 급등, 주요 유입: {_top_ch}.")
-    if total_purchases == 0 and total_spend > 0:
-        _avg_b = df["이탈율"].replace(0, float("nan")).mean()
-        if _avg_b and _avg_b >= 60:
-            _t1_lines.append(f"⚠️ <b>전환 0건</b> — 광고비 {total_spend:,}원 집행했으나 이탈율 평균 {_avg_b:.0f}%로 높음. <b>액션플랜:</b> 소재 이미지와 상품페이지 메시지 일관성 점검, 랜딩 상품 직링크로 교체.")
-        else:
-            _t1_lines.append(f"⚠️ <b>전환 0건</b> — 클릭은 유입되나 결제 미전환. <b>액션플랜:</b> 결제 페이지 내 배송비 노출 시점·리뷰 수·CTA 버튼 위치 점검 필요.")
-    elif total_purchases > 0:
-        _conv_rate_ok = overall_cvr >= 1.0
-        _cr_color = "#27AE60" if _conv_rate_ok else "#F39C12"
-        _t1_lines.append(f"🛍 전환율 <b style='color:{_cr_color}'>{overall_cvr}%</b> — {'양호. 트래픽 증가 시 전환 비례 상승 기대.' if _conv_rate_ok else '전환율 1% 미달. 방문자 대비 구매가 적음 — 상품 상세 페이지 설득력 강화 필요.'}")
-    if total_spend > 0 and len(ad_days) > 0:
-        _spend_trend = "증가" if ad_days["광고비"].iloc[-1] > ad_days["광고비"].mean() else "감소"
-        _t1_lines.append(f"💸 최근 광고비 {_spend_trend} 추세 — {'전환율 개선 없이 증액은 CPO 악화로 이어짐. 소재 교체 후 증액 순서 권장.' if _spend_trend == '증가' and total_purchases == 0 else '광고비와 전환이 함께 움직이는지 추이를 지속 모니터링.'}")
-    if _t1_lines:
-        insight_box(_t1_lines, COLOR["orange"])
+    # (개별 인사이트 박스 → 상단 '이번 기간 핵심 & 액션' 패널로 통합)
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── 소재 피로도 알림 배너 ────────────────────────────────────────
-    # '광고 소재별 성과' 섹션의 기간 선택(아래쪽)과 동일한 값으로 동기화
-    _fatigue_preset_map = {"최근 7일": "last_7d", "최근 14일": "last_14d", "최근 30일": "last_30d"}
-    _fatigue_period_label = st.session_state.get("creative_preset", "최근 7일")
-    _fatigued_ads = load_meta_creative_fatigue(_fatigue_preset_map.get(_fatigue_period_label, "last_14d"))
-    if _fatigued_ads:
-        _critical_ads = [a for a in _fatigued_ads if a["level"] == "critical"]
-        _warning_ads  = [a for a in _fatigued_ads if a["level"] == "warning"]
-
-        if _critical_ads:
-            _rows_html = "".join([
-                f"<div style='margin-top:6px;'>"
-                f"<span style='background:#E74C3C;color:white;font-size:11px;font-weight:700;"
-                f"padding:2px 7px;border-radius:3px;margin-right:8px;'>교체 필요</span>"
-                f"<span style='font-size:13px;font-weight:600;color:#1A1A1A;'>{a['소재명'][:40]}</span>"
-                f"<span style='font-size:12px;color:#888;margin-left:8px;'>{a['reason']} · {a['집행일수']}일 집행</span>"
-                f"</div>"
-                for a in _critical_ads
-            ])
-            st.markdown(f"""
-            <div style='background:#FFF0F0;border-left:4px solid #E74C3C;border-radius:6px;
-                        padding:14px 18px;margin-bottom:12px;'>
-                <div style='display:flex;justify-content:space-between;align-items:flex-start;'>
-                    <div>
-                        <span style='font-size:15px;font-weight:700;color:#C0392B;'>🚨 소재 교체 필요</span>
-                        <span style='font-size:12px;color:#888;margin-left:10px;'>아래 소재의 CTR이 급락했어요 ({_fatigue_period_label} 기준). 즉시 교체를 권장합니다.</span>
-                    </div>
-                    <a href='https://business.facebook.com/adsmanager' target='_blank'
-                       style='background:#E74C3C;color:white;padding:7px 14px;border-radius:5px;
-                              font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0;margin-left:16px;'>
-                       🔄 광고 관리자 열기
-                    </a>
-                </div>
-                {_rows_html}
-            </div>""", unsafe_allow_html=True)
-
-        if _warning_ads:
-            _rows_html = "".join([
-                f"<div style='margin-top:6px;'>"
-                f"<span style='background:#F39C12;color:white;font-size:11px;font-weight:700;"
-                f"padding:2px 7px;border-radius:3px;margin-right:8px;'>주의</span>"
-                f"<span style='font-size:13px;font-weight:600;color:#1A1A1A;'>{a['소재명'][:40]}</span>"
-                f"<span style='font-size:12px;color:#888;margin-left:8px;'>{a['reason']} · {a['집행일수']}일 집행</span>"
-                f"</div>"
-                for a in _warning_ads
-            ])
-            st.markdown(f"""
-            <div style='background:#FFFBF0;border-left:4px solid #F39C12;border-radius:6px;
-                        padding:14px 18px;margin-bottom:12px;'>
-                <div style='display:flex;justify-content:space-between;align-items:flex-start;'>
-                    <div>
-                        <span style='font-size:15px;font-weight:700;color:#D35400;'>⚠️ 소재 피로도 감지</span>
-                        <span style='font-size:12px;color:#888;margin-left:10px;'>{_fatigue_period_label} 기준 · 3~5일 내 소재 교체를 준비하세요.</span>
-                    </div>
-                    <a href='https://business.facebook.com/adsmanager' target='_blank'
-                       style='background:#F39C12;color:white;padding:7px 14px;border-radius:5px;
-                              font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0;margin-left:16px;'>
-                       🔄 광고 관리자 열기
-                    </a>
-                </div>
-                {_rows_html}
-            </div>""", unsafe_allow_html=True)
 
     # 차트 2+3: 광고 효율 & 채널 유입
     col_left, col_right = st.columns([3, 2])
@@ -2288,60 +2310,36 @@ with tab1:
                 hovermode="x unified",
             )
             st.plotly_chart(fig2, use_container_width=True)
-            # ── 광고 효율 인사이트 ────────────────────────────────
-            _ae_lines = []
-            _ctr_vals = ad_df[ad_df["CTR"] > 0]["CTR"]
-            if len(_ctr_vals) >= 3:
-                _ctr_avg   = _ctr_vals.mean()
-                _ctr_last  = _ctr_vals.iloc[-1]
-                _ctr_color = "#27AE60" if _ctr_last >= _ctr_avg else "#E74C3C"
-                _ctr_msg   = ("현재 소재 반응 양호. 예산 증액 고려 가능." if _ctr_last >= _ctr_avg * 1.1
-                              else "CTR이 평균 대비 하락 — 소재 피로 신호. 이미지·문구 교체 시점." if _ctr_last < _ctr_avg * 0.8
-                              else "CTR 안정적 유지 중.")
-                _ae_lines.append(f"📣 CTR <b style='color:{_ctr_color}'>{_ctr_last:.2f}%</b> (평균 {_ctr_avg:.2f}%) — {_ctr_msg}")
-            _roas_vals = ad_df[ad_df["ROAS"] > 0]["ROAS"]
-            if not _roas_vals.empty:
-                _roas_last  = _roas_vals.iloc[-1]
-                _roas_color = "#27AE60" if _roas_last >= 3 else ("#F39C12" if _roas_last >= 1.5 else "#E74C3C")
-                _ae_lines.append(f"💰 최근 ROAS <b style='color:{_roas_color}'>{_roas_last:.1f}배</b> — {'수익 구간. 소재·타겟 유지하며 예산 확대.' if _roas_last >= 3 else '손익분기 근처. 전환 소재 추가 테스트 권장.' if _roas_last >= 1.5 else 'ROAS 손실 구간. 현 캠페인 일시 중단 후 소재·타겟 재설정 필요.'}")
-            _cpo_vals = ad_df[ad_df["CPO"] > 0]["CPO"]
-            if len(_cpo_vals) >= 2:
-                _cpo_trend = "개선" if _cpo_vals.iloc[-1] < _cpo_vals.mean() else "악화"
-                _ae_lines.append(f"🎯 CPO 추이 <b>{'↓ ' if _cpo_trend=='개선' else '↑ '}{int(_cpo_vals.iloc[-1]):,}원</b> (평균 {int(_cpo_vals.mean()):,}원) — {'전환 효율 개선 중. 지금 타겟·소재 조합 유지 권장.' if _cpo_trend=='개선' else 'CPO 상승 중 — 타겟 오디언스 포화 또는 소재 피로. 유사 타겟 전환 또는 소재 A/B 테스트 시작.'}")
-            elif total_spend > 0 and total_purchases == 0:
-                _ae_lines.append(f"⚠️ 전환 미발생 — 광고비 집행 중이나 CPO·ROAS 산출 불가. <b>조치:</b> 픽셀 이벤트 정상 수신 여부 확인 후, 전환 캠페인 대신 트래픽 캠페인으로 모수 확보 후 리타게팅 전환 집행 고려.")
-            if _ae_lines:
-                insight_box(_ae_lines, COLOR["green"])
+            # (개별 인사이트 → 상단 액션 패널로 통합)
         else:
             st.info("광고 집행 데이터 없음")
 
     with col_right:
-        chart_container("채널별 누적 유입", "어디서 온 사람들이 가장 많은지")
-        ch_totals = {
-            "메타 유료광고":     int(df["유입_메타"].sum()),
-            "인스타그램 오가닉": int(df.get("유입_인스타오가닉", pd.Series([0])).sum()),
-            "공식인스타 바이오": int(df["유입_공식"].sum()),
-            "개인인스타 바이오": int(df["유입_개인"].sum()),
-            "직접방문":          int(df["유입_직접"].sum()),
-        }
-        ch_totals = {k: v for k, v in ch_totals.items() if v > 0}
-        if ch_totals:
-            fig3 = go.Figure(go.Pie(
-                labels=list(ch_totals.keys()),
-                values=list(ch_totals.values()),
-                hole=0.52,
-                marker=dict(colors=[CHANNEL_COLORS[k] for k in ch_totals.keys()],
-                            line=dict(color="white", width=2)),
-                textinfo="label+percent",
-                textfont=dict(size=12),
-                hovertemplate="<b>%{label}</b><br>%{value:,}명 (%{percent})<extra></extra>",
-            ))
+        chart_container("채널별 일별 유입 추이", "날짜별로 어떤 채널이 트래픽을 이끌었는지")
+        _ig_org_col = df.get("유입_인스타오가닉", pd.Series([0]*len(df)))
+        ch_df = df[(df["유입_메타"] + _ig_org_col + df["유입_공식"] + df["유입_개인"] + df["유입_직접"]) > 0]
+        if not ch_df.empty:
+            fig3 = go.Figure()
+            for ch, col_key, color in [
+                ("메타 유료광고",     "유입_메타",         "#1877F2"),
+                ("인스타그램 오가닉", "유입_인스타오가닉", "#C13584"),
+                ("공식인스타 바이오", "유입_공식",         "#E1306C"),
+                ("개인인스타 바이오", "유입_개인",         "#F56040"),
+                ("직접방문",          "유입_직접",         "#1A1A1A"),
+            ]:
+                fig3.add_trace(go.Bar(
+                    x=ch_df["날짜"], y=ch_df.get(col_key, pd.Series([0]*len(ch_df))),
+                    name=ch, marker_color=color,
+                    hovertemplate=f"<b>%{{x}}</b><br>{ch}: %{{y}}명<extra></extra>"))
             fig3.update_layout(
-                height=300, margin=dict(l=0, r=0, t=10, b=10),
-                showlegend=False,
-                annotations=[dict(text=f"총<br>{fmt_num(sum(ch_totals.values()))}명",
-                                  x=0.5, y=0.5, font_size=14, font_color="#1A1A1A",
-                                  showarrow=False)]
+                height=300, barmode="stack",
+                margin=dict(l=0, r=0, t=10, b=0),
+                plot_bgcolor="white", paper_bgcolor="white",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                            font=dict(size=10)),
+                xaxis=dict(type="category", showgrid=False, tickfont=dict(size=10)),
+                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11), title="방문자수"),
+                hovermode="x unified",
             )
             st.plotly_chart(fig3, use_container_width=True)
 
@@ -2381,48 +2379,9 @@ with tab1:
         st.plotly_chart(fig4, use_container_width=True)
 
         _pixel_total = int(nvr_df["신규"].sum())
-        _latest_ret  = nvr_df["재방문"].iloc[-3:].mean()
-        _early_ret   = nvr_df["재방문"].iloc[:max(1, len(nvr_df)-7)].mean()
-        _ret_up      = _latest_ret > _early_ret * 1.2
-        _nr4_lines   = []
-        _nr4_lines.append(f"🎯 <b>누적 픽셀 모수 {_pixel_total:,}명</b> — 리타게팅 캠페인이 이 모수 전체를 커버하도록 설정됐는지 확인. 신규 방문 후 3~7일 내 리타게팅 시 전환율 cold 대비 3~5배 높음.")
-        if _ret_up:
-            _nr4_lines.append(f"📈 재방문자 최근 증가 추세 — 브랜드 인지도 누적 중. <b>액션플랜:</b> 재방문자 전용 '첫 구매 혜택' 리타게팅 광고 집행 타이밍.")
-        else:
-            _nr4_lines.append(f"📉 재방문 비율 정체 — 신규 방문자가 재방문으로 이어지지 않는 상황. <b>액션플랜:</b> 카카오 알림톡 또는 인스타 DM 팔로업, '장바구니 담기' 리마인드 광고 설정.")
-        if total_purchases == 0 and _pixel_total >= 100:
-            _nr4_lines.append(f"💡 전환 미발생이지만 모수 {_pixel_total:,}명 확보됨 — 지금이 '재고 한정·마감 임박' 메시지로 리타게팅 집행할 최적 타이밍.")
-        insight_box(_nr4_lines, COLOR["purple"])
+        # (개별 인사이트 → 상단 액션 패널로 통합)
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # 차트 5: 채널 유입 스택 바 (접기)
-    with st.expander("📊 일별 채널 유입 상세 보기"):
-        chart_container("일별 채널별 유입 구성", "어떤 날 어떤 채널이 트래픽을 이끌었는지")
-        _ig_org_col = df.get("유입_인스타오가닉", pd.Series([0]*len(df)))
-        ch_df = df[(df["유입_메타"] + _ig_org_col + df["유입_공식"] + df["유입_개인"] + df["유입_직접"]) > 0]
-        if not ch_df.empty:
-            fig5 = go.Figure()
-            for ch, col_key, color in [
-                ("메타 유료광고",     "유입_메타",         "#1877F2"),
-                ("인스타그램 오가닉", "유입_인스타오가닉", "#C13584"),
-                ("공식인스타 바이오", "유입_공식",         "#E1306C"),
-                ("개인인스타 바이오", "유입_개인",         "#F56040"),
-                ("직접방문",          "유입_직접",         "#1A1A1A"),
-            ]:
-                fig5.add_trace(go.Bar(x=ch_df["날짜"], y=ch_df[col_key],
-                    name=ch, marker_color=color,
-                    hovertemplate=f"<b>%{{x}}</b><br>{ch}: %{{y}}명<extra></extra>"))
-            fig5.update_layout(
-                height=260, barmode="stack",
-                margin=dict(l=0, r=0, t=10, b=0),
-                plot_bgcolor="white", paper_bgcolor="white",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                xaxis=dict(type="category", showgrid=False, tickfont=dict(size=11)),
-                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", tickfont=dict(size=11)),
-                hovermode="x unified",
-            )
-            st.plotly_chart(fig5, use_container_width=True)
 
     # 구매 전환 채널 상세 — "이 구매가 어디서 왔는지" 날짜+채널 단위로 추적
     with st.expander("🛍️ 구매 전환 채널 상세 — 어떤 구매가 어디서 발생했는지"):
@@ -2549,6 +2508,7 @@ with tab1:
     # 광고 소재별 성과 섹션
     # ════════════════════════════════════════════════════════════
     st.markdown("---")
+    section_title("광고 성과", "소재별 신호등으로 끌 것·지켜볼 것을 한눈에")
     chart_container("📱 광고 소재별 성과", "Meta 광고 소재(Ad) 단위 전환·CPO·ROAS·CTR")
 
     _col_pr, _ = st.columns([2, 5])
@@ -2616,13 +2576,44 @@ with tab1:
         if _live_only and "상태" in df_ads.columns:
             df_ads = df_ads[df_ads["상태"] == "ACTIVE"].reset_index(drop=True)
 
+        st.markdown(
+            "<div style='font-size:11px;color:#888;margin:2px 0 8px;'>"
+            "🟢 효자(ROAS≥1.8, 유지) &nbsp;·&nbsp; 🟡 관찰(전환약함/표본 쌓는중) &nbsp;·&nbsp; "
+            "🔴 끄기(노출 2,000↑ 전환 0) &nbsp;·&nbsp; ⚪ 보류(노출 1,000 미만 표본부족)</div>",
+            unsafe_allow_html=True)
+
         _thumb_map = dict(zip(df_ads["ad_id"], df_ads["thumbnail"]))
 
         _th = lambda t: f"<th style='padding:8px 10px;background:#F7F7F7;font-size:12px;font-weight:600;color:#555;border-bottom:2px solid #E8E8E8;white-space:nowrap;text-align:left;'>{t}</th>"
         _td = lambda v, align="right": f"<td style='padding:7px 10px;font-size:12px;color:#1A1A1A;border-bottom:1px solid #F0F0F0;text-align:{align};white-space:nowrap;'>{v}</td>"
 
+        # 신호등 판정 (손익분기 ROAS 1.8 · 노출 2000↑ 전환0=끄기 · 노출 1000미만=표본부족)
+        def _signal(r):
+            imp = int(r.get("노출수", 0)); conv = int(r.get("전환수", 0))
+            roas = float(r.get("ROAS", 0) or 0); spend = int(r.get("광고비", 0))
+            freq = float(r.get("빈도", 0) or 0)
+            if spend == 0:
+                return ("⚪", "#999", "미집행")
+            if conv > 0:
+                if roas >= 1.8:
+                    return ("🟢", "#27AE60", f"ROAS {roas}배 · 수익")
+                return ("🟡", "#F39C12", f"전환 {conv}건이나 ROAS {roas}<1.8")
+            # 전환 0
+            if imp >= 2000:
+                extra = f" · 빈도 {freq:.1f} 소진" if freq >= 2 else ""
+                return ("🔴", "#E74C3C", f"노출 {imp:,}인데 전환 0{extra} — 끄기")
+            if imp < 1000:
+                return ("⚪", "#999", f"노출 {imp:,} 표본부족 — 보류")
+            return ("🟡", "#F39C12", f"노출 {imp:,} 전환 0 — 관찰")
+
         _rows_html = ""
         for _, _r in df_ads.iterrows():
+            _sig_emoji, _sig_color, _sig_reason = _signal(_r)
+            _sig_html = (
+                f"<div style='display:flex;align-items:center;gap:5px;'>"
+                f"<span style='font-size:15px;'>{_sig_emoji}</span>"
+                f"<span style='font-size:11px;color:{_sig_color};line-height:1.3;'>{_sig_reason}</span></div>"
+            )
             _thumb_html = (
                 f"<img src='{_r['thumbnail']}' style='width:44px;height:44px;object-fit:cover;border-radius:5px;display:block;' onerror=\"this.replaceWith(document.createTextNode('—'))\">"
                 if _r["thumbnail"] else "<span style='color:#CCC;font-size:11px;'>—</span>"
@@ -2636,6 +2627,7 @@ with tab1:
             _rows_html += f"""<tr>
                 <td style='padding:6px 10px;border-bottom:1px solid #F0F0F0;'>{_thumb_html}</td>
                 <td style='padding:7px 10px;font-size:11px;color:#333;border-bottom:1px solid #F0F0F0;max-width:300px;line-height:1.4;'>{_full}</td>
+                <td style='padding:7px 10px;border-bottom:1px solid #F0F0F0;min-width:150px;'>{_sig_html}</td>
                 {_td(f"{int(_r['광고비']):,}원")}
                 {_td(f"{int(_r['노출수']):,}")}
                 <td style='padding:7px 10px;font-size:12px;font-weight:{_freq_w};color:{_freq_c};border-bottom:1px solid #F0F0F0;text-align:right;white-space:nowrap;'>{_freq_v:.2f}</td>
@@ -2651,7 +2643,7 @@ with tab1:
         <div style='overflow-x:auto;'>
         <table style='width:100%;border-collapse:collapse;'>
             <thead><tr>
-                {_th('썸네일')}{_th('캠페인 > 광고세트 > 소재명')}
+                {_th('썸네일')}{_th('캠페인 > 광고세트 > 소재명')}{_th('신호 · 근거')}
                 {_th('광고비')}{_th('노출')}{_th('빈도')}{_th('클릭')}{_th('CTR')}
                 {_th('전환')}{_th('CPO')}{_th('ROAS')}{_th('매출')}
             </tr></thead>
@@ -2698,60 +2690,8 @@ with tab1:
     # 상품 페이지별 전환율 섹션
     # ════════════════════════════════════════════════════════════
     st.markdown("---")
+    section_title("상품", "어느 상품이 관심 많은데 상세페이지에서 놓치는지")
     chart_container("🛍️ 상품 페이지별 조회 vs 이탈률", "어느 상품이 관심 많은데 상세페이지에서 놓치는지 — GA4 상품 제목 기준")
-
-    @st.cache_data(ttl=3600)
-    def load_product_page_stats(days: int = 14):
-        if not _GA4_AVAILABLE:
-            return None, "GA4 패키지 없음"
-        try:
-            from datetime import date, timedelta
-            GA4_PROPERTY_ID = "536368183"
-            creds = _get_oauth_creds()
-            ga4   = BetaAnalyticsDataClient(credentials=creds)
-            end   = date.today() - timedelta(days=1)
-            start = end - timedelta(days=days - 1)
-            # Cafe24는 모든 상품이 /product/detail.html 한 경로 → pageTitle로 상품 구분
-            res = ga4.run_report(RunReportRequest(
-                property=f"properties/{GA4_PROPERTY_ID}",
-                dimensions=[Dimension(name="pageTitle")],
-                metrics=[
-                    Metric(name="screenPageViews"),
-                    Metric(name="bounceRate"),
-                    Metric(name="averageSessionDuration"),
-                ],
-                date_ranges=[DateRange(
-                    start_date=start.strftime("%Y-%m-%d"),
-                    end_date=end.strftime("%Y-%m-%d"),
-                )],
-                dimension_filter=FilterExpression(filter=Filter(
-                    field_name="pagePath",
-                    string_filter=Filter.StringFilter(value="/product/detail", match_type="CONTAINS"))),
-                order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="screenPageViews"), desc=True)],
-                limit=30,
-            ))
-            rows = []
-            for row in res.rows:
-                title = row.dimension_values[0].value
-                # " - Nominical" 접미사 제거
-                name = title.replace(" - Nominical", "").strip()
-                if not name or name in ("Nominical", "NOMINICAL"):
-                    continue
-                views  = int(row.metric_values[0].value)
-                bounce = round(float(row.metric_values[1].value) * 100, 1)
-                dur    = int(float(row.metric_values[2].value))
-                if views < 10:   # 조회 10회 미만은 노이즈 제외
-                    continue
-                rows.append({
-                    "상품명": name,
-                    "조회수": views,
-                    "이탈률(%)": bounce,
-                    "평균체류(초)": dur,
-                })
-            import pandas as _pd
-            return _pd.DataFrame(rows), None
-        except Exception as e:
-            return None, str(e)
 
     _pp_col1, _pp_col2 = st.columns([1, 5])
     with _pp_col1:
