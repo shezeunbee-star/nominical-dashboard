@@ -25,21 +25,38 @@ creds = SACredentials.from_service_account_file(SA_FILE, scopes=[
     "https://www.googleapis.com/auth/drive",
 ])
 gc = gspread.authorize(creds)
-ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+def _retry(fn, *args, **kwargs):
+    """구글 시트 일시 오류(500/503 등)에 최대 4회 재시도 (지수 백오프)."""
+    import time
+    from gspread.exceptions import APIError
+    for attempt in range(4):
+        try:
+            return fn(*args, **kwargs)
+        except APIError as e:
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            if code in (429, 500, 502, 503) and attempt < 3:
+                wait = 2 ** attempt
+                print(f"  ⚠️ 시트 {code} 오류 — {wait}초 후 재시도 ({attempt+1}/3)")
+                time.sleep(wait)
+                continue
+            raise
+
+ws = _retry(lambda: gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME))
 
 HEADERS = ["플랫폼", "주문일", "상품명", "상품코드", "컬러", "사이즈", "수량", "판매가", "수수료율(%)", "실수익", "주문상태"]
 
 def ensure_header():
-    first = ws.row_values(1)
+    first = _retry(lambda: ws.row_values(1))
     if not first or first[0] != "플랫폼":
-        ws.update(values=[HEADERS], range_name="A1:K1")
+        _retry(lambda: ws.update(values=[HEADERS], range_name="A1:K1"))
         print("  헤더 작성 완료")
 
 def get_existing_keys():
     """중복 방지용 기존 데이터 키 (플랫폼+주문일+상품코드+컬러+사이즈+수량) 수집
     - 같은 날 같은 상품을 다른 사람이 주문해도 별도 건으로 처리하기 위해 수량 포함
     """
-    all_rows = ws.get_all_values()
+    all_rows = _retry(ws.get_all_values)
     keys = {}  # key → count (같은 키가 몇 번 등장했는지)
     for row in all_rows[1:]:
         if len(row) >= 7:
@@ -431,7 +448,7 @@ def main(files):
         print(f"  ✅ {added}건 추가 ({len(rows)-added}건 중복 스킵)")
 
     if all_new:
-        ws.append_rows(all_new, value_input_option="USER_ENTERED")
+        _retry(lambda: ws.append_rows(all_new, value_input_option="USER_ENTERED"))
         print(f"\n🎉 총 {len(all_new)}건 시트에 저장 완료!")
     else:
         print("\n새로 추가할 데이터 없음.")

@@ -1996,13 +1996,13 @@ with tab1:
         for _, a in _dead.head(3).iterrows():
             _tiers["crit"].append((f"{str(a['소재명'])[:24]} 끄기",
                                    f"노출 {int(a['노출수']):,}인데 전환 0"))
-        # 🟢 ROAS 손익분기 이상 효자 (상위 2)
-        _win = _ads7[_ads7["ROAS"] >= BE_ROAS].sort_values("ROAS", ascending=False)
+        # 🟢 ROAS 손익분기 이상 효자 (상위 2) — 노출 1,000↑ 표본 충분한 것만 (ROAS 뻥튀기 방지)
+        _win = _ads7[(_ads7["ROAS"] >= BE_ROAS) & (_ads7["노출수"] >= 1000)].sort_values("ROAS", ascending=False)
         for _, a in _win.head(2).iterrows():
             _tiers["good"].append((f"{str(a['소재명'])[:24]} ROAS {a['ROAS']}배",
                                    "예산 증액 가치" if a["ROAS"] >= 3 else "수익 구간, 유지"))
-        # 🟡 전환은 있으나 ROAS<손익분기 → 관찰
-        _watch = _ads7[(_ads7["전환수"] > 0) & (_ads7["ROAS"] < BE_ROAS)].sort_values("광고비", ascending=False)
+        # 🟡 전환은 있으나 ROAS<손익분기 → 관찰 (표본 충분한 것만)
+        _watch = _ads7[(_ads7["전환수"] > 0) & (_ads7["ROAS"] < BE_ROAS) & (_ads7["노출수"] >= 1000)].sort_values("광고비", ascending=False)
         for _, a in _watch.head(2).iterrows():
             _tiers["warn"].append((f"{str(a['소재명'])[:24]} 관찰",
                                    f"ROAS {a['ROAS']}배 · 손익분기 1.8 미만"))
@@ -2595,6 +2595,9 @@ with tab1:
             if spend == 0:
                 return ("⚪", "#999", "미집행")
             if conv > 0:
+                # 표본 가드: 노출 적으면 ROAS 뻥튀기(어트리뷰션 착시) → 보류
+                if imp < 1000:
+                    return ("⚪", "#999", f"노출 {imp:,}·전환 {conv}(표본 적음, ROAS 과대) — 보류")
                 if roas >= 1.8:
                     return ("🟢", "#27AE60", f"ROAS {roas}배 · 수익")
                 return ("🟡", "#F39C12", f"전환 {conv}건이나 ROAS {roas}<1.8")
@@ -2911,14 +2914,20 @@ with tab2:
                     f"<div style='font-size:12px;color:#8C8C8C;margin-top:6px;'>{int(_row['수량'])}개 · 순매출 {int(_row['순매출']):,}원</div>"
                     f"</div>", unsafe_allow_html=True)
 
-    # ── 상품별 판매 추이 (상위 5개, 일별) ──────────────────────────
+    # ── 상품별 판매 추이 (표시 개수 선택, 일별) ──────────────────────
     if not _sold.empty and "주문일_dt" in _sold.columns:
-        _top5 = _rank.head(5)["상품기준"].tolist()
-        _trend = _sold[_sold["상품기준"].isin(_top5)].copy()
+        _n_total = _rank["상품기준"].nunique()
+        _tc1, _tc2 = st.columns([3, 1])
+        with _tc2:
+            _trend_n = st.selectbox("추이 표시", ["TOP 5", "TOP 10", f"전체 {_n_total}개"],
+                                    key="pf_trend_n", label_visibility="collapsed")
+        _n = _n_total if _trend_n.startswith("전체") else (10 if "10" in _trend_n else 5)
+        _top_items = _rank.head(_n)["상품기준"].tolist()
+        _trend = _sold[_sold["상품기준"].isin(_top_items)].copy()
         _trend["_일"] = _trend["주문일_dt"].dt.date
         _piv = (_trend.groupby(["_일","상품기준"])["_수량"].sum().reset_index())
         if not _piv.empty and _piv["_일"].nunique() > 1:
-            st.markdown("<div style='font-size:14px;font-weight:700;margin:18px 0 4px;'>📈 상품별 판매 추이 (TOP 5)</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size:14px;font-weight:700;margin:18px 0 4px;'>📈 상품별 판매 추이 ({_trend_n})</div>", unsafe_allow_html=True)
             _fig = px.line(_piv, x="_일", y="_수량", color="상품기준", markers=True,
                            labels={"_일":"날짜","_수량":"판매수량","상품기준":"상품"}, height=340)
             _fig.update_layout(plot_bgcolor="white", paper_bgcolor="white",
