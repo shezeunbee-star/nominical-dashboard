@@ -1629,7 +1629,8 @@ def update_cafe24_yesterday():
         BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
         TOKEN_FILE = os.path.join(BASE_DIR, "cafe24_token.json")
         if not os.path.exists(TOKEN_FILE):
-            return False, "❌ cafe24_token.json 없음"
+            # 클라우드엔 토큰 파일이 없음(보안상 미배포). Cafe24는 로컬에서 동기화되므로 조용히 스킵.
+            return True, "ℹ️ Cafe24는 로컬에서 동기화됩니다 (클라우드 새로고침 대상 아님)"
 
         with open(TOKEN_FILE) as f:
             t = _json.load(f)
