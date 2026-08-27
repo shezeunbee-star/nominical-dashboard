@@ -926,6 +926,7 @@ def load_inventory_data(sales_from=None, sales_to=None):
     if df_plat.empty:
         for r in inv_rows:
             r["판매수량(기준일 이후)"] = 0
+            r["누적판매량"] = 0
             r["기간판매"] = 0
             r["매칭건수"] = 0
             r["최근7일판매"] = 0
@@ -956,6 +957,7 @@ def load_inventory_data(sales_from=None, sales_to=None):
                 m = m[m["주문일_dt"] > cutoff]
 
             r["판매수량(기준일 이후)"] = int(m["수량"].sum())
+            r["누적판매량"] = int(m_all["수량"].sum())  # 전체기간 총 판매(취소·반품 제외)
             r["매칭건수"] = len(m)
 
             # 선택 기간 판매량 (재고 차감과 무관한 조회용)
@@ -3934,16 +3936,18 @@ with tab6:
     # ── KPI 요약 ──────────────────────────────────────────────────
     total_baseline = int(df_inv["기준재고"].sum())
     total_sold     = int(df_inv["기간판매"].sum()) if _period_active else int(df_inv["판매수량(기준일 이후)"].sum())
+    total_cum_sold = int(df_inv["누적판매량"].sum())
     total_stock    = int(df_inv["재고"].sum())
     out_of_stock   = len(df_inv[(df_inv["기준재고"] > 0) & (df_inv["재고"] <= 0)])
     low_stock      = len(df_inv[(df_inv["재고"] > 0) & (df_inv["재고"] <= 5)])
 
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
     with k1: kpi_card("기준재고 합계", f"{total_baseline:,}개")
-    with k2: kpi_card(f"판매 ({_sold_label})" if _period_active else "기준일 이후 판매", f"{total_sold:,}개")
-    with k3: kpi_card("현재 재고", f"{total_stock:,}개")
-    with k4: kpi_card("품절", f"{out_of_stock}개", "재고 0 이하", out_of_stock == 0)
-    with k5: kpi_card("재고 부족(5개 이하)", f"{low_stock}개", "", low_stock == 0)
+    with k2: kpi_card("누적 판매량", f"{total_cum_sold:,}개", "전체기간 총 판매")
+    with k3: kpi_card(f"판매 ({_sold_label})" if _period_active else "기준일 이후 판매", f"{total_sold:,}개")
+    with k4: kpi_card("현재 재고", f"{total_stock:,}개")
+    with k5: kpi_card("품절", f"{out_of_stock}개", "재고 0 이하", out_of_stock == 0)
+    with k6: kpi_card("재고 부족(5개 이하)", f"{low_stock}개", "", low_stock == 0)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -3998,6 +4002,7 @@ with tab6:
             {_td3(r['컬러'], 'center')}
             {_td3(r['사이즈'], 'center')}
             {_td3(f"{int(r['기준재고']):,}")}
+            {_td3(f"<b>{int(r['누적판매량']):,}</b>")}
             {_td3(f"{int(r['판매수량(기준일 이후)']):,}")}{_period_td}
             <td style='padding:7px 10px;font-size:13px;font-weight:700;color:{_color};border-bottom:1px solid #F0F0F0;text-align:right;'>{int(r['재고']):,}</td>
             {_td3(f"{r['일평균판매']:.1f}개")}
@@ -4011,7 +4016,7 @@ with tab6:
     <div style='overflow-x:auto;'>
     <table style='width:100%;border-collapse:collapse;'>
         <thead><tr>
-            {_th3('품번')}{_th3('상품명(Cafe24)')}{_th3('컬러')}{_th3('사이즈')}{_th3('기준재고')}{_th3('판매(기준일후)')}{_period_th}{_th3('현재재고')}{_th3('일평균판매(7일)')}{_th3('소진예상일')}{_th3('매칭건수')}{_th3('비고')}
+            {_th3('품번')}{_th3('상품명(Cafe24)')}{_th3('컬러')}{_th3('사이즈')}{_th3('기준재고')}{_th3('누적판매')}{_th3('판매(기준일후)')}{_period_th}{_th3('현재재고')}{_th3('일평균판매(7일)')}{_th3('소진예상일')}{_th3('매칭건수')}{_th3('비고')}
         </tr></thead>
         <tbody>{_rows_html3}</tbody>
     </table></div>
