@@ -242,6 +242,50 @@ def render_action_panel(tiers, note=""):
         f'{note_html}</div>{rows}</div>', unsafe_allow_html=True)
 
 
+def render_briefing_panel(sections, tiers, note=""):
+    """다방면 브리핑 패널 — sections: [(아이콘, 제목, [줄...])] + tiers(액션 요약)."""
+    sec_html = ""
+    for icon, title, lines in sections:
+        if not lines:
+            continue
+        _lis = "".join(
+            f'<div style="font-size:12.5px;color:#3A3835;line-height:1.55;margin:2px 0;">· {l}</div>'
+            for l in lines)
+        sec_html += (
+            f'<div style="padding:10px 0;border-top:1px solid #EDEBE8;">'
+            f'<div style="font-size:12.5px;font-weight:700;color:#1A1A1A;margin-bottom:4px;">{icon} {title}</div>'
+            f'{_lis}</div>')
+    # 권장 액션 (우선순위)
+    _labels = [("crit", "지금 할 것"), ("warn", "지켜볼 것"), ("good", "잘 되는 것")]
+    _rows = ""
+    for key, label in _labels:
+        items = tiers.get(key, [])
+        if not items:
+            continue
+        fg = STATUS[key]["fg"]
+        _lines = []
+        for t, w in items:
+            why = (' — <span style="color:#8C8A86;">' + w + '</span>') if w else ""
+            _lines.append(f'<div style="font-size:12.5px;color:#1A1A1A;line-height:1.4;margin-bottom:4px;"><b>{t}</b>{why}</div>')
+        _rows += (
+            f'<div style="display:grid;grid-template-columns:104px 1fr;gap:14px;padding:9px 0;border-top:1px solid #F0EEEB;">'
+            f'<div style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:#1A1A1A;">'
+            f'<span style="width:8px;height:8px;border-radius:50%;background:{fg};display:inline-block;"></span>{label}</div>'
+            f'<div>{"".join(_lines)}</div></div>')
+    act_html = ""
+    if _rows:
+        act_html = (
+            f'<div style="margin-top:12px;padding-top:8px;border-top:2px solid #1A1A1A;">'
+            f'<div style="font-size:12.5px;font-weight:800;color:#1A1A1A;margin-bottom:2px;">✅ 권장 액션</div>'
+            f'{_rows}</div>')
+    note_html = f'<span style="font-size:12px;color:#8C8A86;">{note}</span>' if note else ""
+    st.markdown(
+        f'<div style="background:#FFFFFF;border:1px solid #D8D5D0;border-radius:14px;padding:18px 22px;margin:20px 0 6px;">'
+        f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:2px;">'
+        f'<span style="font-size:17px;font-weight:800;letter-spacing:-0.01em;color:#1A1A1A;">🎯 이번 기간 핵심 &amp; 액션</span>'
+        f'{note_html}</div>{sec_html}{act_html}</div>', unsafe_allow_html=True)
+
+
 def _refresh_creds(creds):
     import time as _time
     from google.auth.transport.requests import Request as _Request
@@ -1624,8 +1668,9 @@ def update_cafe24_yesterday():
         import base64, json as _json
         from datetime import date, timedelta
 
-        yesterday = date.today() - timedelta(days=1)
-        date_str  = yesterday.strftime("%Y-%m-%d")
+        _end   = date.today()
+        _start = _end - timedelta(days=3)          # 오늘 포함 + 최근 4일 재동기화(오늘분·누락 보정)
+        date_str = _end.strftime("%Y-%m-%d")       # 메시지·라벨용
 
         # ── Cafe24 토큰 로드 & 갱신 ──────────────────────────────
         BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -1685,8 +1730,8 @@ def update_cafe24_yesterday():
         resp = _requests.get(
             f"https://{t['shop_id']}.cafe24api.com/api/v2/admin/orders",
             headers=headers,
-            params={"start_date": date_str, "end_date": date_str,
-                    "limit": 100, "embed": "items"},
+            params={"start_date": _start.strftime("%Y-%m-%d"), "end_date": _end.strftime("%Y-%m-%d"),
+                    "limit": 500, "embed": "items"},
             timeout=15,
         )
         if resp.status_code != 200:
@@ -2049,17 +2094,66 @@ with tab1:
                 f"유료 유입 비중 {_trend}{_org_txt}. 유료만 늘리면 광고비↑·CPO 악화 — "
                 "공식 인스타 릴스 주 2회 재개로 오가닉 유입 살려 광고 부담 낮추기"))
 
-    # (4) 전환·ROAS 진단 (기간 df 기준)
+    # (4) 전환·ROAS 진단 (기간 df 기준) — 상품 콕 집어서
     if total_visitors > 0 and overall_cvr < 1.2:
-        _pp_ref = f"특히 '{_worst_pp_name}'부터" if _worst_pp_name else "조회 상위 상품부터"
-        _tiers["warn"].append(("전환율 개선 — 상세페이지",
-                               f"전환율 {overall_cvr}% (방문 1,000명당 {round(overall_cvr*10,1)}건) · 신규 {avg_new_rate}% — {_pp_ref} 상단 할인가·리뷰 보강"))
+        _weak = _strong = None; _lost_n = 0
+        try:
+            if _dfpp7 is not None and not _dfpp7.empty:
+                _cand2 = _dfpp7[_dfpp7["조회수"] >= max(30, _dfpp7["조회수"].quantile(0.4))].copy()
+                if not _cand2.empty:
+                    # 이탈로 잃은 방문자(조회×이탈률) 최다 = 개선 레버 1순위
+                    _cand2["_lost"] = _cand2["조회수"] * _cand2["이탈률(%)"] / 100
+                    _wk = _cand2.sort_values("_lost", ascending=False).iloc[0]
+                    _sg = _cand2.sort_values("이탈률(%)").iloc[0]
+                    if _wk["이탈률(%)"] >= 45:
+                        _weak = _wk; _lost_n = int(_wk["_lost"])
+                    if _sg["이탈률(%)"] < 40 and str(_sg["상품명"]) != (str(_weak["상품명"]) if _weak is not None else ""):
+                        _strong = _sg
+        except Exception:
+            pass
+        _detail = f"전환율 {overall_cvr}% (방문 1,000명당 {round(overall_cvr*10,1)}건) · 신규 {avg_new_rate}%. "
+        if _weak is not None:
+            _dur_w = int(_weak["평균체류(초)"])
+            _fix = "첫 화면 텍스트뿐일 가능성 — 착용컷·후기 먼저" if _dur_w < 20 else "상단 코디컷·사이즈표·리뷰 위치 점검"
+            _detail += (f"⚠️ 보강 1순위 '{str(_weak['상품명'])[:20]}' — 조회 {int(_weak['조회수']):,}·이탈 {_weak['이탈률(%)']:.0f}%로 "
+                        f"약 {_lost_n:,}명이 상세에서 이탈(손실 최다). {_fix}. ")
+        if _strong is not None:
+            _detail += f"반면 '{str(_strong['상품명'])[:20]}'는 이탈 {_strong['이탈률(%)']:.0f}%로 상세가 잘 잡혀요 — 여기에 광고·쿠폰 태우면 전환 즉시. "
+        if _weak is None and _strong is None:
+            _detail += "조회 상위 상품 상세부터 할인가·리뷰 보강."
+        _tiers["warn"].append(("전환율 개선 — 상세페이지", _detail.strip()))
     if total_spend > 0 and overall_roas < 1.5:
         _tiers["crit"].append(("예산 증액 보류",
                                f"종합 ROAS {overall_roas}배 — 지금 증액은 손실. 소재 교체로 전환부터"))
     if _vis_drop is not None and _vis_drop <= -12:
         _tiers["crit"].append(("소재 교체 우선",
                                f"유입 {abs(_vis_drop)}% 감소 — 오디언스·소재 소진 신호. 3개월+ 소재 교체"))
+    # (5) 소재 피로 → 지켜볼 것
+    if _ads7 is not None and not _ads7.empty and "빈도" in _ads7.columns:
+        _fat = _ads7[(_ads7["빈도"] >= 2.5) & (_ads7["광고비"] > 0)].sort_values("빈도", ascending=False)
+        if not _fat.empty:
+            _f = _fat.iloc[0]
+            _tiers["warn"].append((f"{str(_f['소재명'])[:24]} 소재 피로",
+                                   f"빈도 {_f['빈도']:.1f} — 같은 사람 반복 노출, 3~5일 내 교체 준비"))
+
+    # (6) 상품 조회 상위 momentum → 잘 되는 것 (이탈 낮으면)
+    try:
+        if _dfpp7 is not None and not _dfpp7.empty:
+            _t = _dfpp7.sort_values("조회수", ascending=False).iloc[0]
+            if _t["이탈률(%)"] < 40 and int(_t["조회수"]) >= 100:
+                _tiers["good"].append((f"{str(_t['상품명'])[:22]} 관심 최상위",
+                                       f"조회 {int(_t['조회수']):,}회·이탈 {_t['이탈률(%)']:.0f}% — 상세 잘 잡힘, 광고·콘텐츠 밀 타이밍"))
+    except Exception:
+        pass
+
+    # (7) 긍정 신호 → 잘 되는 것
+    if total_spend > 0 and overall_roas >= 2.0:
+        _tiers["good"].append((f"종합 ROAS {overall_roas}배 — 효율 양호",
+                               "증액 여력 검토" if overall_roas >= 3 else "손익분기(1.8) 상회, 유지"))
+    if _vis_drop is not None and _vis_drop >= 12:
+        _tiers["good"].append((f"유입 {_vis_drop}% 회복",
+                               "새 소재·오가닉 반응 — 전환만 잡으면 매출 직결"))
+
     if not any(_tiers.values()):
         _tiers["good"].append(("특이 신호 없음", "주요 지표 안정 구간"))
 
@@ -2312,6 +2406,23 @@ with tab1:
                 yaxis2=dict(showgrid=False, tickfont=dict(size=11)),
                 hovermode="x unified",
             )
+            # CAC 라인 (신규 방문 1명당 광고비 = 광고비÷신규) — 전용 축 y3(눈금 숨김)으로 자기 범위에 띄움
+            _CAC_HI = 500  # 이 선 넘으면 빨간 점(신규 획득 비쌈)
+            _cac = ad_df.apply(lambda r: round(r["광고비"] / r["신규"]) if r["신규"] > 0 else None, axis=1)
+            _cac_colors = ["#E74C3C" if (not pd.isna(v) and v > _CAC_HI) else COLOR["orange"] for v in _cac]
+            fig2.add_trace(go.Scatter(
+                x=ad_df["날짜"], y=_cac,
+                name=f"CAC (원/신규방문, ●빨강 >{_CAC_HI})", mode="lines+markers+text",
+                connectgaps=True,
+                line=dict(color=COLOR["orange"], width=1.5, dash="dash"),
+                marker=dict(size=6, color=_cac_colors),
+                text=["" if pd.isna(v) else f"{int(v):,}" for v in _cac],
+                textposition="top center", textfont=dict(size=9, color=COLOR["orange"]),
+                hovertemplate="<b>%{x}</b><br>CAC: %{y:,.0f}원/신규방문<extra></extra>",
+                yaxis="y3",
+            ))
+            fig2.update_layout(yaxis3=dict(overlaying="y", side="right", showticklabels=False,
+                                           showgrid=False, zeroline=False))
             st.plotly_chart(fig2, use_container_width=True)
             # (개별 인사이트 → 상단 액션 패널로 통합)
         else:
