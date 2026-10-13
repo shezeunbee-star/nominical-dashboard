@@ -3745,8 +3745,8 @@ def _render_ig_tab():
     _ig_sel = st.radio("계정 선택", _ig_account_list, horizontal=True, key="ig_account_sel")
     _ig_cfg = IG_ACCOUNTS[_ig_sel]
 
-    if not _ig_cfg["token"]:
-        st.warning(f"⚠️ {_ig_sel} 토큰이 아직 설정되지 않았습니다.")
+    if not _get_ig_token(_ig_sel):
+        st.warning(f"⚠️ {_ig_sel} 토큰이 '🔑 IG토큰' 시트에 아직 없습니다.")
         return
 
     with st.spinner("인스타그램 데이터 불러오는 중..."):
@@ -3894,7 +3894,11 @@ def _render_ig_tab():
 
 
 with tab4:
-    _render_ig_tab()
+    try:
+        _render_ig_tab()
+    except Exception as _ig_err:
+        # IG 탭에서 무슨 일이 나도 뒤 탭(입고재고 등)은 멀쩡히 렌더
+        st.warning(f"⚠️ 인스타그램 탭을 불러오지 못했어요: {_ig_err}")
 
 
 # ════════════════════════════════════════════════════════════════
