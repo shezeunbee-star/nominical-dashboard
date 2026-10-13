@@ -1756,6 +1756,7 @@ def update_cafe24_yesterday():
             platform = _market_to_platform(order.get("market_id"))
             order_date = (order.get("order_date") or "")[:10]
             order_id_c24 = order.get("order_id", "")
+            buyer = (order.get("buyer_name") or order.get("billing_name") or "").strip()
             items = order.get("items", [])
             order_total = 0
             order_ga4_items = []
@@ -1790,7 +1791,7 @@ def update_cafe24_yesterday():
                 key = f"{platform}|{order_date}|{code}|{color}|{size}"
                 if key not in existing_keys:
                     new_rows.append([platform, order_date, name, code,
-                                     color, size, qty, total, comm, profit, status])
+                                     color, size, qty, total, comm, profit, status, buyer])
                     existing_keys.add(key)
                     order_has_new = True
                 order_total += total
@@ -3689,7 +3690,9 @@ with tab3:
 # ════════════════════════════════════════════════════════════════
 # TAB 4: 인스타그램 콘텐츠 분석
 # ════════════════════════════════════════════════════════════════
-with tab4:
+def _render_ig_tab():
+    # tab4 본문을 함수로 분리 — 내부 조기 종료를 st.stop()(앱 전체 중단) 대신 return으로.
+    # IG 토큰 만료/ API 오류가 나도 뒤 탭(플레이북·입고재고·26FW)이 멀쩡히 렌더됨.
     st.markdown("---")
 
     _ig_account_list = list(IG_ACCOUNTS.keys())
@@ -3698,14 +3701,14 @@ with tab4:
 
     if not _ig_cfg["token"]:
         st.warning(f"⚠️ {_ig_sel} 토큰이 아직 설정되지 않았습니다.")
-        st.stop()
+        return
 
     with st.spinner("인스타그램 데이터 불러오는 중..."):
         _prof, _media_rows = load_ig_profile(_ig_sel)
 
     if "error" in _prof:
         st.error(f"API 오류: {_prof}")
-        st.stop()
+        return
 
     _df_ig = pd.DataFrame(_media_rows) if _media_rows else pd.DataFrame()
 
@@ -3842,6 +3845,10 @@ with tab4:
             </tr></thead>
             <tbody>{_rows_html2}</tbody>
         </table></div>""", unsafe_allow_html=True)
+
+
+with tab4:
+    _render_ig_tab()
 
 
 # ════════════════════════════════════════════════════════════════

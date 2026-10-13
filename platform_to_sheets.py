@@ -44,12 +44,15 @@ def _retry(fn, *args, **kwargs):
 
 ws = _retry(lambda: gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME))
 
-HEADERS = ["플랫폼", "주문일", "상품명", "상품코드", "컬러", "사이즈", "수량", "판매가", "수수료율(%)", "실수익", "주문상태"]
+HEADERS = ["플랫폼", "주문일", "상품명", "상품코드", "컬러", "사이즈", "수량", "판매가", "수수료율(%)", "실수익", "주문상태", "수령인"]
 
 def ensure_header():
     first = _retry(lambda: ws.row_values(1))
-    if not first or first[0] != "플랫폼":
-        _retry(lambda: ws.update(values=[HEADERS], range_name="A1:K1"))
+    # 그리드가 좁으면 수령인(L열)까지 확장
+    if ws.col_count < len(HEADERS):
+        _retry(lambda: ws.add_cols(len(HEADERS) - ws.col_count))
+    if not first or first[0] != "플랫폼" or len(first) < len(HEADERS):
+        _retry(lambda: ws.update(values=[HEADERS], range_name="A1:L1"))
         print("  헤더 작성 완료")
 
 def get_existing_keys():
@@ -151,6 +154,7 @@ def parse_29cm(filepath):
     i_qty    = find_col(header, "수량") or 11
     i_price  = find_col(header, "판매가", "상품금액", "단가") or 20
     i_status = find_col(header, "주문상태", "처리상태") or 33
+    i_recv   = find_col(header, "수령인", "수취인", "수령자명") or 6
     rows = []
     for i, row in enumerate(all_rows):
         if i == 0: continue
@@ -161,11 +165,12 @@ def parse_29cm(filepath):
         total  = price * qty
         profit = round(total * (1 - COMMISSION / 100))
         status = str(row[i_status]) if row[i_status] else ""
+        recv   = str(row[i_recv]).strip() if i_recv is not None and row[i_recv] else ""
         rows.append([
             "29CM", fmt_date(row[i_date]),
             str(row[i_prod]), str(row[i_code]),
             color, size, qty, total,
-            COMMISSION, profit, status
+            COMMISSION, profit, status, recv
         ])
     return rows
 
@@ -192,9 +197,10 @@ def parse_wconcept(filepath):
         # 구버전 (31컬럼)
         i_name, i_color, i_size, i_qty, i_price, i_cancel, i_code, i_base = 11, 12, 13, 15, 18, 23, 29, 10
     # 주문일 컬럼 자동 탐지 (없으면 index 1 사용 — W컨셉 첫번째 컬럼은 주문번호)
-    i_date_wc = find_col(header, "주문일", "주문일시", "결제일") 
+    i_date_wc = find_col(header, "주문일", "주문일시", "결제일")
     if i_date_wc is None:
         i_date_wc = 1
+    i_recv = find_col(header, "수취인", "수령인", "수령자명") or 3
 
     rows = []
     for i, row in enumerate(all_rows):
@@ -220,12 +226,13 @@ def parse_wconcept(filepath):
         profit = round(total * (1 - COMMISSION / 100))
         status = "취소" if row[i_cancel] else "정상"
         code   = str(row[i_code]) if row[i_code] else str(row[i_base])
+        recv   = str(row[i_recv]).strip() if i_recv is not None and row[i_recv] else ""
         # 주문일: 헤더에서 자동 탐지 (파일마다 위치 다를 수 있음)
         rows.append([
             "W컨셉", fmt_date(row[i_date_wc]),
             str(row[i_name]), code,
             color, size, qty, total,
-            COMMISSION, profit, status
+            COMMISSION, profit, status, recv
         ])
     return rows
 
@@ -238,6 +245,7 @@ def parse_ssf(filepath):
     # 헤더에서 주문일 컬럼 자동 탐지
     header = ws_f.row_values(0)
     i_date = next((i for i, h in enumerate(header) if h and "주문일" in str(h)), 0)
+    i_recv = next((i for i, h in enumerate(header) if h and ("수령자" in str(h) or "수취인" in str(h))), 13)
     rows = []
     for i in range(1, ws_f.nrows):
         row = ws_f.row_values(i)
@@ -249,11 +257,12 @@ def parse_ssf(filepath):
         total  = price * qty
         profit = round(total * (1 - comm / 100))
         status = str(row[25]) if row[25] else ""
+        recv   = str(row[i_recv]).strip() if i_recv < len(row) and row[i_recv] else ""
         rows.append([
             "SSF", fmt_date(row[i_date]),
             str(row[21]), str(row[20]),
             color, size, qty, total,
-            comm, profit, status
+            comm, profit, status, recv
         ])
     return rows
 
@@ -272,8 +281,10 @@ def parse_sivillage(filepath):
     print(f"  📦 SI Village 파싱: {os.path.basename(filepath)}")
     wb = openpyxl.load_workbook(filepath)
     ws_f = wb.active
+    all_rows = list(ws_f.iter_rows(values_only=True))
+    i_recv = find_col(all_rows[0], "수령", "수취", "받는") if all_rows else None
     rows = []
-    for i, row in enumerate(ws_f.iter_rows(values_only=True)):
+    for i, row in enumerate(all_rows):
         if i == 0: continue          # 헤더 스킵
         if not row[8]: continue      # 상품명 없으면 스킵
 
@@ -284,12 +295,13 @@ def parse_sivillage(filepath):
         status = str(row[2]) if row[2] else "정상"
         code   = str(row[7]) if row[7] else "-"
         date   = fmt_date_sivillage(row[18])
+        recv   = str(row[i_recv]).strip() if i_recv is not None and i_recv < len(row) and row[i_recv] else ""
 
         rows.append([
             "SI Village", date,
             str(row[8]), code,
             color, size, qty, total,
-            COMMISSION, profit, status
+            COMMISSION, profit, status, recv
         ])
     return rows
 
@@ -351,7 +363,7 @@ def parse_cafe24(filepath):
             "Cafe24", date,
             product, code,
             color, size, qty, total,
-            COMMISSION_CAFE24, profit, status
+            COMMISSION_CAFE24, profit, status, ""
         ])
     return rows
 # ── 플랫폼 감지 ─────────────────────────────────────────────────
@@ -373,6 +385,7 @@ def parse_coupang(filepath):
     i_code  = find_col(header, "업체상품코드") or 16
     i_qty   = find_col(header, "구매수(수량)", "구매수") or 22
     i_price = find_col(header, "옵션판매가(판매단가)", "옵션판매가") or 23
+    i_recv  = find_col(header, "수취인", "수령인", "수령자", "받는")
     SIZE_PAT = re.compile(r'^(XXS|XS|S|M|L|XL|XXL|2XL|3XL|FREE|\d{2,3})$', re.I)
     rows = []
     for i, row in enumerate(all_rows):
@@ -392,11 +405,12 @@ def parse_coupang(filepath):
         price  = int(float(row[i_price])) if row[i_price] else 0
         total  = price * qty
         profit = round(total * (1 - COMMISSION_COUPANG / 100))
+        recv   = str(row[i_recv]).strip() if i_recv is not None and row[i_recv] else ""
         rows.append([
             "쿠팡", fmt_date(row[i_date]),
             str(row[i_prod]), str(row[i_code] or "-"),
             color, size, qty, total,
-            COMMISSION_COUPANG, profit, "결제완료"
+            COMMISSION_COUPANG, profit, "결제완료", recv
         ])
     return rows
 

@@ -1,0 +1,225 @@
+<title>발송 체크리스트</title>
+<style>
+  /* 레이아웃: 단일 컬럼, 고정 요약 헤더 + 집품/플래그/택배 3단 스택, 탭=체크 */
+  :root{
+    --bg:#f4f6fa; --surface:#ffffff; --surface-2:#eef1f7;
+    --ink:#121722; --muted:#5c6676; --line:#dde3ec;
+    --accent:#1e53ff; --accent-ink:#ffffff;
+    --crit:#d92d20; --crit-bg:#fdeceb;
+    --warn:#b25e00; --warn-bg:#fdf2e3;
+    --good:#1f8a4c; --good-bg:#e7f5ec;
+    --done:#9aa4b2;
+    --r:14px; --tap:#e9edf5;
+    color-scheme:light;
+  }
+  :root:not([data-theme="light"]){ @media (prefers-color-scheme:dark){
+    --bg:#0e1116; --surface:#171c24; --surface-2:#1f2630;
+    --ink:#eef2f8; --muted:#97a1b2; --line:#2a323e;
+    --accent:#5b86ff; --accent-ink:#0a0d12;
+    --crit:#ff6b5e; --crit-bg:#3a1b19;
+    --warn:#f0a84a; --warn-bg:#3a2a12;
+    --good:#54c17e; --good-bg:#15301f;
+    --done:#5c6676; --tap:#232b36;
+    color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0e1116; --surface:#171c24; --surface-2:#1f2630;
+    --ink:#eef2f8; --muted:#97a1b2; --line:#2a323e;
+    --accent:#5b86ff; --accent-ink:#0a0d12;
+    --crit:#ff6b5e; --crit-bg:#3a1b19;
+    --warn:#f0a84a; --warn-bg:#3a2a12;
+    --good:#54c17e; --good-bg:#15301f;
+    --done:#5c6676; --tap:#232b36;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Segoe UI",system-ui,sans-serif;
+    font-variant-numeric:tabular-nums;-webkit-text-size-adjust:100%}
+  .wrap{max-width:520px;margin:0 auto;padding:0 14px 48px}
+
+  header{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;
+    background:var(--bg);padding:14px 0 10px;border-bottom:1px solid var(--line)}
+  .hrow{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+  h1{font-size:17px;font-weight:800;margin:0;letter-spacing:-.01em}
+  .gen{font-size:11px;color:var(--muted)}
+  .count{display:flex;align-items:baseline;gap:8px;margin-top:8px}
+  .count b{font-size:40px;font-weight:800;line-height:1;letter-spacing:-.02em}
+  .count span{font-size:13px;color:var(--muted)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .chip{font-size:12px;font-weight:600;padding:4px 9px;border-radius:999px;
+    background:var(--surface-2);color:var(--muted)}
+  .chip b{color:var(--ink)}
+
+  section{margin-top:20px}
+  h2{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);margin:0 0 9px;display:flex;align-items:center;gap:7px}
+  h2 .n{background:var(--accent);color:var(--accent-ink);border-radius:999px;
+    font-size:11px;padding:1px 8px;letter-spacing:0}
+
+  ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+  .item{display:flex;align-items:center;gap:12px;background:var(--surface);
+    border:1px solid var(--line);border-radius:var(--r);padding:13px 14px;
+    cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;transition:background .12s}
+  .item:active{background:var(--tap)}
+  .box{flex:none;width:24px;height:24px;border-radius:7px;border:2px solid var(--line);
+    display:grid;place-items:center;color:transparent;font-size:15px;font-weight:900}
+  .item.done .box{background:var(--good);border-color:var(--good);color:#fff}
+  .lbl{flex:1;min-width:0}
+  .lbl .t{font-size:15px;font-weight:600;line-height:1.3}
+  .lbl .s{font-size:12px;color:var(--muted);margin-top:2px}
+  .item.done .lbl .t,.item.done .lbl .s{color:var(--done);text-decoration:line-through}
+  .oi{margin-top:6px}
+  .oi .on{font-size:14px;font-weight:600;line-height:1.3}
+  .oi .oo{font-size:13px;color:var(--muted);margin-top:1px}
+  .oi .oo b{color:var(--ink);font-weight:700}
+  .item.done .oi .on,.item.done .oi .oo,.item.done .oi .oo b{color:var(--done);text-decoration:line-through}
+  .noname{font-size:12px;color:var(--muted);font-style:italic}
+  .qty{flex:none;font-size:20px;font-weight:800;min-width:30px;text-align:right}
+  .qty em{font-size:12px;font-weight:600;color:var(--muted);font-style:normal}
+
+  .tag{flex:none;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px}
+  .tag.dup{background:var(--warn-bg);color:var(--warn)}
+  .tag.low{background:var(--crit-bg);color:var(--crit)}
+
+  .flag{border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;background:var(--surface)}
+  .flag+.flag{margin-top:7px}
+  .flag.crit{background:var(--crit-bg);border-color:transparent}
+  .flag.warn{background:var(--warn-bg);border-color:transparent}
+  .flag .ft{font-size:13px;font-weight:700;margin-bottom:4px}
+  .flag.crit .ft{color:var(--crit)} .flag.warn .ft{color:var(--warn)}
+  .flag .fl{font-size:13px;line-height:1.5}
+
+  .reset{margin-top:26px;width:100%;padding:12px;border-radius:var(--r);
+    border:1px solid var(--line);background:var(--surface);color:var(--muted);
+    font-size:13px;font-weight:600;cursor:pointer}
+  .reset:active{background:var(--tap)}
+  .empty{color:var(--muted);font-size:14px;padding:16px;text-align:center;
+    background:var(--surface);border:1px dashed var(--line);border-radius:var(--r)}
+  .progress{font-size:12px;color:var(--muted);font-weight:600}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="hrow">
+      <h1>📦 발송 체크리스트</h1>
+      <span class="gen" id="gen"></span>
+    </div>
+    <div class="count"><b id="total">0</b><span id="rangeTxt"></span></div>
+    <div class="chips" id="chips"></div>
+  </header>
+
+  <section id="flagsSec" hidden>
+    <h2>⚠️ 먼저 확인</h2>
+    <div id="flags"></div>
+  </section>
+
+  <section>
+    <h2>📋 집품 리스트 <span class="n" id="pickProg">0/0</span></h2>
+    <ul id="picking"></ul>
+  </section>
+
+  <section>
+    <h2>🚚 택배 목록 <span class="n" id="ordProg">0/0</span></h2>
+    <ul id="orders"></ul>
+  </section>
+
+  <button class="reset" id="reset">체크 전체 초기화</button>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const KEY = "nmc_ship_" + (DATA ? DATA.generated.slice(0,10) : "x");
+let state = {};
+try { state = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch(e){}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){} };
+
+const esc = s => String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const el = (t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+
+function render(){
+  if(!DATA){ document.querySelector(".wrap").innerHTML='<p class="empty">데이터가 없습니다.</p>'; return; }
+  document.getElementById("gen").textContent = "업데이트 "+DATA.generated;
+  document.getElementById("total").textContent = DATA.total;
+  document.getElementById("rangeTxt").textContent = "택배 건 · 주문 "+DATA.range;
+
+  const chips = document.getElementById("chips");
+  const order = ["자사몰","W컨셉","SSF","29CM","지그재그","쿠팡","무신사","스마트스토어"];
+  Object.entries(DATA.channels).sort((a,b)=> (order.indexOf(a[0])+99)%100 - (order.indexOf(b[0])+99)%100)
+    .forEach(([k,v])=> chips.appendChild(el("span","chip","<b>"+esc(k)+"</b> "+v)));
+
+  // 플래그
+  const fWrap=document.getElementById("flags"); let hasFlag=false;
+  (DATA.lows||[]).forEach(l=>{ hasFlag=true;
+    fWrap.appendChild(el("div","flag crit",
+      '<div class="ft">⚫ 품절 위험 — 재고 부족</div><div class="fl">'+esc(l.label)+
+      ' · 필요 '+l.qty+'개 / 재고 '+(l.stock==null?"?":l.stock)+'개</div>')); });
+  (DATA.dups||[]).forEach(w=>{ hasFlag=true;
+    fWrap.appendChild(el("div","flag warn",
+      '<div class="ft">🟡 중복 주문 의심</div><div class="fl">'+esc(w)+
+      ' 님 주문 2건 이상 — 결제 확인 후 발송 (취소분 섞였을 수 있음)</div>')); });
+  (DATA.cancels||[]).forEach(c=>{ hasFlag=true;
+    const t=[c.name&&shortLabel(c.name,c.color,c.size)].filter(Boolean).join(" ");
+    fWrap.appendChild(el("div","flag crit",
+      '<div class="ft">🔴 취소/반품 — 발송 금지</div><div class="fl">'+esc(c.who||"")+' · '+esc(t)+'</div>')); });
+  document.getElementById("flagsSec").hidden = !hasFlag;
+
+  // 집품
+  const pk=document.getElementById("picking");
+  DATA.picking.forEach((p,i)=>{
+    const id="p"+i;
+    const stockTxt = p.stock==null ? "" : "재고 "+p.stock;
+    const sub = [stockTxt].filter(Boolean).join(" · ");
+    const row=el("li","item"+(state[id]?" done":""));
+    row.innerHTML='<div class="box">✓</div>'+
+      '<div class="lbl"><div class="t">'+esc(p.label)+'</div>'+(sub?'<div class="s">'+esc(sub)+'</div>':'')+'</div>'+
+      (p.low?'<span class="tag low">부족</span>':'')+
+      '<div class="qty">'+p.qty+'<em> 개</em></div>';
+    row.onclick=()=>toggle(id,row,updatePick);
+    pk.appendChild(row);
+  });
+  if(!DATA.picking.length) pk.appendChild(el("li","empty","발송 대기 품목이 없어요"));
+
+  // 택배 목록
+  const ob=document.getElementById("orders");
+  DATA.orders.forEach((o,i)=>{
+    const id="o"+i;
+    const head = esc(o.ch) + (o.who&&o.who!=="-"
+        ? ' · <b>'+esc(o.who)+'</b>'
+        : ' · <span class="noname">수령인 미등록</span>');
+    const itemsHtml = o.items.map(it=>{
+      const nm = shortProduct(it.name);
+      const opt = [it.color&&it.color!=="-"?it.color:"", it.size&&it.size!=="-"?it.size:""]
+        .filter(Boolean).join(" ");
+      const optLine = opt ? '<b>'+esc(opt)+'</b>'+(it.qty>1?' ×'+it.qty:'')
+                          : (it.qty>1?'×'+it.qty:'');
+      return '<div class="oi"><div class="on">'+esc(nm)+'</div>'+
+             (optLine?'<div class="oo">'+optLine+'</div>':'')+'</div>';
+    }).join("");
+    const row=el("li","item"+(state[id]?" done":""));
+    row.innerHTML='<div class="box">✓</div>'+
+      '<div class="lbl"><div class="t">'+head+'</div>'+itemsHtml+'</div>'+
+      (o.dup?'<span class="tag dup">중복?</span>':'');
+    row.onclick=()=>toggle(id,row,updateOrd);
+    ob.appendChild(row);
+  });
+  if(!DATA.orders.length) ob.appendChild(el("li","empty","발송 대기 택배가 없어요"));
+
+  updatePick(); updateOrd();
+}
+function shortProduct(name){
+  return String(name).replace(/\[[^\]]*\]/g,"").replace(/\([^)]*\)/g,"").replace(/\s+/g," ").trim();
+}
+function shortLabel(name,color,size){
+  const n=String(name).replace(/\[[^\]]*\]/g,"").replace(/\([^)]*\)/g,"").replace(/\s+/g," ").trim();
+  return [n, color&&color!=="-"?color:"", size&&size!=="-"?size:""].filter(Boolean).join(" ");
+}
+function toggle(id,row,upd){ state[id]=!state[id]; row.classList.toggle("done",state[id]); save(); upd(); }
+function updatePick(){ const n=DATA.picking.length,d=DATA.picking.filter((_,i)=>state["p"+i]).length;
+  document.getElementById("pickProg").textContent=d+"/"+n; }
+function updateOrd(){ const n=DATA.orders.length,d=DATA.orders.filter((_,i)=>state["o"+i]).length;
+  document.getElementById("ordProg").textContent=d+"/"+n; }
+
+document.getElementById("reset").onclick=()=>{ if(confirm("체크를 전부 지울까요?")){ state={}; save(); location.reload(); } };
+render();
+</script>
