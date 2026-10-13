@@ -755,24 +755,65 @@ def load_meta_daily_creative(date_preset="last_30d"):
 
 
 # ── Instagram 계정 설정 ───────────────────────────────────────────────
+# 토큰은 코드에 두지 않고 '🔑 IG토큰' 시트에서 읽는다(보안 + 클라우드 영속 저장).
+# 각 로드 시 마지막 갱신 24h 경과했으면 자동 연장(refresh_access_token) → 60일 만료 방지.
 IG_ACCOUNTS = {
-    "beeunkim (개인)": {
-        "token": "IGAAfKtJZBiU09BZAFlCaGlVamtKc29sYWVGLUx5aHF4dmt6TEpDYjNiaEZANQVZAzQ3VjX0ZA6dEdLUWFScXBRNnpkbm5Qd0VyYkFPSTdFbXRnVlRTVlU4a1dWY2N0UG03TGRVSVpSa1VqQThUNG41alhFUDFtVDZAGOWQwNVpPY3FucwZDZD",
-        "ig_id": "17841401409070018",
-        "color": "#C13584",
-    },
-    "nominical_official (공식)": {
-        "token": "IGAAfKtJZBiU09BZAGJZAVzJJeDc2QmVWWFBQTmdCMmtTYTJySlp0c21seW8taUdUX0U0UlFDRWlueE4zUF9OM0JSSTdsNi02SXJiMVdmVHFyZAThENUdCVEhxRkYzVkJfYlJERkZARdzZAqMTV6MV9aX1hRemIzZAlI2Y214clZA5Rk9HcwZDZD",
-        "ig_id": "17841465777820020",
-        "color": "#1A1A2E",
-    },
+    "beeunkim (개인)":        {"ig_id": "17841401409070018", "color": "#C13584"},
+    "nominical_official (공식)": {"ig_id": "17841465777820020", "color": "#1A1A2E"},
 }
+IG_TOKEN_SHEET = "🔑 IG토큰"
+
+def _ig_sheet_creds():
+    SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
+              "https://www.googleapis.com/auth/drive"]
+    if "gcp_service_account" in st.secrets:
+        return SACredentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+    if os.path.exists(SA_FILE):
+        return SACredentials.from_service_account_file(SA_FILE, scopes=SCOPES)
+    c = OAuthCredentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    if c.expired and c.refresh_token:
+        _refresh_creds(c)
+    return c
+
+def _get_ig_token(account_key: str) -> str:
+    """🔑 IG토큰 시트에서 토큰 조회. 마지막 갱신 24h 경과 시 자동 연장 후 시트에 기록.
+    (만료된 토큰은 연장 불가 → 그대로 반환하고 load_ig_profile이 오류 처리)"""
+    from datetime import datetime as _dtm
+    try:
+        gc = gspread.authorize(_ig_sheet_creds())
+        ws = gc.open_by_key(SPREADSHEET_ID).worksheet(IG_TOKEN_SHEET)
+        vals = ws.get_all_values()
+    except Exception:
+        return ""
+    for i, row in enumerate(vals[1:], start=2):   # 행1 헤더
+        if row and row[0].strip() == account_key:
+            token = (row[2] if len(row) > 2 else "").strip()
+            refreshed = (row[3] if len(row) > 3 else "").strip()
+            if not token:
+                return ""
+            try:
+                last = _dtm.fromisoformat(refreshed) if refreshed else None
+            except Exception:
+                last = None
+            if last is None or (_dtm.now() - last).total_seconds() > 86400:
+                try:
+                    r = _requests.get("https://graph.instagram.com/refresh_access_token",
+                                      params={"grant_type": "ig_refresh_token", "access_token": token},
+                                      timeout=10).json()
+                    if r.get("access_token"):
+                        token = r["access_token"]
+                        ws.update(values=[[token, _dtm.now().isoformat(timespec="seconds")]],
+                                  range_name=f"C{i}:D{i}")
+                except Exception:
+                    pass  # 연장 실패해도 기존 토큰으로 조회 시도
+            return token
+    return ""
 
 @st.cache_data(ttl=3600)
 def load_ig_profile(account_name: str):
     """Instagram 프로필 + 최근 미디어 + 인사이트 로드. TTL=1시간."""
     cfg = IG_ACCOUNTS.get(account_name, {})
-    token = cfg.get("token", "")
+    token = _get_ig_token(account_name)
     ig_id = cfg.get("ig_id", "")
     if not token or not ig_id:
         return {}, []
