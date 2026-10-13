@@ -828,8 +828,12 @@ def load_ig_profile(account_name: str):
         if "error" in prof:
             return prof, []
 
+        # 미디어 조회는 토큰이 돌려준 계정 id 사용 (토큰 재발급 시 id 체계가 바뀔 수 있어
+        # IG_ACCOUNTS의 고정 ig_id 대신 프로필 id를 우선)
+        _mid = prof.get("id") or ig_id
+
         # 미디어 (최근 20개)
-        med = _requests.get(f"{base}/{ig_id}/media", params={
+        med = _requests.get(f"{base}/{_mid}/media", params={
             "fields": "id,caption,media_type,timestamp,like_count,comments_count,permalink,thumbnail_url,media_url",
             "limit": 20,
             "access_token": token,
