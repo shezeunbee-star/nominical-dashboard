@@ -11,7 +11,7 @@ import gspread
 from google.oauth2.service_account import Credentials as SACredentials
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from google.auth.transport.requests import Request
-import json, os, time
+import json, os, time, re
 import requests as _requests
 
 # ── GA4 API imports (lazy-safe) ────────────────────────────────────
@@ -954,8 +954,7 @@ def _normalize_color(c):
 def _normalize_size(s):
     """사이즈 표기 차이 흡수 — '(크롭핏)'·'(레귤러핏)' 같은 꼬리표와 공백 제거.
     예: 'L (레귤러핏)' → 'L', 'S/M (크롭핏)' → 'S/M'."""
-    import re as _re
-    return _re.sub(r"\s*\(.*?\)\s*", "", str(s)).strip().upper()
+    return re.sub(r"\s*\(.*?\)\s*", "", str(s)).strip().upper()
 
 @st.cache_data(ttl=300)
 def load_inventory_data(sales_from=None, sales_to=None):
