@@ -30,6 +30,10 @@ START  = END - timedelta(days=DAYS - 1)
 def norm_color(c):
     return re.sub(r"\s+", "", str(c or "")).lower()
 
+def norm_size(s):
+    # '(크롭핏)'·'(레귤러핏)' 같은 꼬리표 제거 후 대문자 ('L (레귤러핏)'→'L')
+    return re.sub(r"\s*\(.*?\)\s*", "", str(s or "")).strip().upper()
+
 def parse_opt(opt):
     """option_value → (색, 사이즈). 대시보드 파서와 동일 규칙."""
     opt = str(opt or "")
@@ -76,21 +80,51 @@ def load_cafe24():
     r.raise_for_status()
     orders, cancels = [], []
     name_count = defaultdict(int)
+    # market_id → 채널 라벨
+    MARKET_CH = {"musinsa": "무신사", "zigzag": "지그재그",
+                 "shopn": "스마트스토어", "smartstore": "스마트스토어"}
+    NAVER_MK = {"NCHECKOUT", "NAVER", "NAVERPAY", "NAVER_PAY", "SHOPN", "SMARTSTORE"}
+    def _channel(mid):
+        m = (mid or "").strip()
+        if m.upper() in NAVER_MK:
+            return "네이버페이" if m.upper().startswith("N") else "스마트스토어"
+        return MARKET_CH.get(m.lower(), "자사몰")
+    _today = END.isoformat()
+    def _naver_pending(oid):
+        # 네이버 N30: 송장이 '오늘' 등록됐으면 오늘 포장 대상, 이전 날짜면 이미 발송된 것 → 제외
+        try:
+            sr = requests.get(f"https://{t['shop_id']}.cafe24api.com/api/v2/admin/orders/{oid}/shipments",
+                              headers=h, timeout=15).json()
+            for s in sr.get("shipments", []):
+                if str(s.get("tracking_no_updated_date") or "")[:10] == _today:
+                    return True
+            return False
+        except Exception:
+            return True  # 조회 실패 시 놓치지 않게 포함
     for o in r.json().get("orders", []):
         who = o.get("buyer_name") or o.get("billing_name") or "?"
+        ch = _channel(o.get("market_id") or "")
+        # 네이버계열은 송장등록 시 바로 N30이 되지만, '오늘' 송장 등록한 것만 오늘 포장 대상
+        is_naver = ch in ("네이버페이", "스마트스토어")
+        naver_ok = _naver_pending(o["order_id"]) if is_naver else False
         pend = []
         for it in o.get("items", []):
             st = str(it.get("order_status") or "").strip().upper()
             color, size = parse_opt(it.get("option_value"))
             row = {"name": str(it.get("product_name", "-")), "color": color, "size": size,
                    "qty": int(float(it.get("quantity", 1) or 1))}
-            if st.startswith("C") or st.startswith("R"):
-                cancels.append({**row, "who": who, "why": "취소/반품"})
+            if st.startswith("C"):
+                cancels.append({**row, "who": who, "why": "취소"})  # 취소 = 발송 금지(아직 안 나간 건)
+            elif st.startswith("R") or st.startswith("E"):
+                pass  # 반품/교환 = 이미 발송·배송된 건 → 발송 리스트와 무관하므로 제외
             elif st == "N21":
-                pend.append(row)  # 배송대기 = 발송 대상 (상품/배송준비중 N10·N20은 아직 제외)
+                pend.append(row)  # 배송대기 = 발송 대상
+            elif st == "N30" and is_naver and naver_ok:
+                pend.append(row)  # 네이버: 오늘 송장 등록한 건만 (어제 등록=이미 발송)
         if pend:
-            orders.append({"ch": "자사몰", "who": who, "items": pend})
-            name_count[who] += 1
+            orders.append({"ch": ch, "who": who, "items": pend})
+            if who not in ("?", "-", ""):
+                name_count[who] += 1
     # 중복주문(같은 고객 2건+) 플래그
     dups = {w for w, c in name_count.items() if c > 1}
     for od in orders:
@@ -99,13 +133,18 @@ def load_cafe24():
 
 # ── 외부몰: 시트에서 기간 내 정상 주문 ─────────────────────
 def load_external(gc):
+    # 파일로 업로드하는 외부몰만 (무신사·지그재그·스마트스토어·Cafe24는 자사몰 API로 일원화)
+    FILE_PLATFORMS = {"W컨셉", "29CM", "SSF", "SI Village", "쿠팡"}
+    # 외부몰은 '발송완료' 상태가 없어 오래된 건이 계속 남으므로 '오늘 올린 주문'만
+    # (그날 출고파일 올려 그날 발송 = 오늘 날짜. 전날 건 이미 나갔다고 보고 제외)
+    EXT_START = END.isoformat()
     ws = gc.open_by_key(SHEET_ID).worksheet(PLAT_SHEET)
     rows = ws.get_all_values()[1:]
     out = []
     for r in rows:
         cells = (r + [""] * 12)[:12]
         plat, odate, name, code, color, size, qty, price, comm, rev, status, recv = cells
-        if plat == "Cafe24" or not (START.isoformat() <= odate <= END.isoformat()):
+        if plat not in FILE_PLATFORMS or not (EXT_START <= odate <= END.isoformat()):
             continue
         if re.match(r"^(취소|반품|C|R)", str(status)):
             continue
@@ -123,7 +162,7 @@ def load_stock(gc):
         _, odate, name, code, color, size, qty, *_rest = (r + [""] * 7)[:7]
         status = r[10] if len(r) > 10 else ""
         if re.search(r"취소|반품", str(status)): continue
-        sales.append((str(name), norm_color(color), str(size).strip(), int(float(qty or 0)), odate))
+        sales.append((str(name), norm_color(color), norm_size(size), int(float(qty or 0)), odate))
     stock = []  # {kw,color_norm,size,current}
     for r in inv:
         if not r or not r[0].strip(): continue
@@ -137,17 +176,17 @@ def load_stock(gc):
         for sname, scol, ssize, sqty, sodate in sales:
             if kw and kw.lower() in sname.lower() and scol == col:
                 if "프리오더" not in kw and "프리오더" in sname: continue
-                if size and size != "-" and ssize != size: continue
+                if size and size != "-" and ssize != norm_size(size): continue
                 if bdate and sodate <= bdate: continue
                 sold += sqty
         stock.append({"kw": kw, "color": col, "size": size, "current": base - sold})
     return stock
 
 def match_stock(stock, pname, color, size):
-    cn, sz = norm_color(color), str(size).strip()
+    cn, sz = norm_color(color), norm_size(size)
     for s in stock:
         if s["kw"] and s["kw"].lower() in pname.lower() and s["color"] == cn:
-            if s["size"] and s["size"] != "-" and sz and s["size"] != sz: continue
+            if s["size"] and s["size"] != "-" and sz and norm_size(s["size"]) != sz: continue
             return s["current"]
     return None
 

@@ -951,6 +951,11 @@ def _normalize_color(c):
     }
     return synonyms.get(c, c)
 
+def _normalize_size(s):
+    """사이즈 표기 차이 흡수 — '(크롭핏)'·'(레귤러핏)' 같은 꼬리표와 공백 제거.
+    예: 'L (레귤러핏)' → 'L', 'S/M (크롭핏)' → 'S/M'."""
+    return re.sub(r"\s*\(.*?\)\s*", "", str(s)).strip().upper()
+
 @st.cache_data(ttl=300)
 def load_inventory_data(sales_from=None, sales_to=None):
     """입고관리 시트(품번/매칭키워드/컬러/사이즈/기준재고/기준일자) + 플랫폼
@@ -1036,7 +1041,7 @@ def load_inventory_data(sales_from=None, sales_to=None):
                 m = m[~m["상품명"].str.contains("프리오더", case=False, na=False, regex=False)]
             m = m[m["_컬러norm"] == color_norm]
             if size and size != "-":
-                m = m[m["사이즈"].astype(str).str.strip() == size]
+                m = m[m["사이즈"].apply(_normalize_size) == _normalize_size(size)]
             m_all = m  # 기준일 컷오프 적용 전 — 기간판매 집계용
             try:
                 cutoff = pd.Timestamp(r["기준일자"]) if r["기준일자"] else None
