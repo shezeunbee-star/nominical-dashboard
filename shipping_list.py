@@ -31,8 +31,8 @@ def norm_color(c):
     return re.sub(r"\s+", "", str(c or "")).lower()
 
 def norm_size(s):
-    # '(크롭핏)'·'(레귤러핏)' 같은 꼬리표 제거 후 대문자 ('L (레귤러핏)'→'L')
-    return re.sub(r"\s*\(.*?\)\s*", "", str(s or "")).strip().upper()
+    # '(크롭핏)'·'(레귤러핏' 같은 꼬리표 제거 — 여는 괄호부터 끝까지 (닫힘 여부 무관)
+    return re.sub(r"\s*[\(（].*$", "", str(s or "")).strip().upper()
 
 def parse_opt(opt):
     """option_value → (색, 사이즈). 대시보드 파서와 동일 규칙."""
@@ -202,6 +202,18 @@ def match_stock(stock, pname, color, size):
             return s["current"]
     return None
 
+# 입고관리 매칭키워드 → 정식명. 플랫폼별 제품명 변형을 하나로 통일(집품 리스트용).
+def load_canon(gc):
+    inv = gc.open_by_key(SHEET_ID).worksheet(INV_SHEET).get_all_values()[1:]
+    seen = {}
+    for r in inv:
+        if not r or not r[0].strip():
+            continue
+        kw = r[1].strip() if len(r) > 1 else ""
+        if kw and kw not in seen:
+            seen[kw] = (r[7].strip() if len(r) > 7 and r[7].strip() else kw)
+    return sorted(seen.items(), key=lambda kv: -len(kv[0]))  # 긴(구체적) 키워드 우선
+
 # ── 집계 ───────────────────────────────────────────────────
 def build():
     gc = gspread.authorize(SACredentials.from_service_account_file(
@@ -209,19 +221,28 @@ def build():
     c24, cancels, dups = load_cafe24()
     ext = load_external(gc)
     stock = load_stock(gc)
+    canon = load_canon(gc)
     orders = c24 + ext
 
-    # 품목별 집품 수량
-    pick = defaultdict(lambda: {"qty": 0, "name": "", "color": "", "size": ""})
+    def canon_name(nm):
+        low = str(nm).lower()
+        for kw, disp in canon:
+            if kw.lower() in low:
+                return disp
+        return short_name(nm)
+
+    # 품목별 집품 수량 (제품명 통일 + 사이즈 꼬리표 정리)
+    pick = defaultdict(lambda: {"qty": 0, "name": "", "color": "", "size": "", "raw": ""})
     for od in orders:
         for it in od["items"]:
-            key = (short_name(it["name"]), it["color"], it["size"])
+            cn, nsz = canon_name(it["name"]), norm_size(it["size"]) or it["size"]
+            key = (cn, it["color"], nsz)
             p = pick[key]; p["qty"] += it["qty"]
-            p["name"], p["color"], p["size"] = key
+            p["name"], p["color"], p["size"] = cn, it["color"], nsz
+            if not p["raw"]: p["raw"] = it["name"]
     picking, lows = [], []
     for (n, c, s), p in sorted(pick.items(), key=lambda kv: -kv[1]["qty"]):
-        cur = match_stock(stock, next(it["name"] for od in orders for it in od["items"]
-                                      if short_name(it["name"]) == n), c, s)
+        cur = match_stock(stock, p["raw"], c, s)
         low = cur is not None and cur < p["qty"]
         label = " ".join(x for x in [n, c if c != "-" else "", s if s != "-" else ""] if x)
         row = {"label": label, "qty": p["qty"], "stock": cur, "low": low}

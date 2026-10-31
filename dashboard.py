@@ -953,8 +953,8 @@ def _normalize_color(c):
 
 def _normalize_size(s):
     """사이즈 표기 차이 흡수 — '(크롭핏)'·'(레귤러핏)' 같은 꼬리표와 공백 제거.
-    예: 'L (레귤러핏)' → 'L', 'S/M (크롭핏)' → 'S/M'."""
-    return re.sub(r"\s*\(.*?\)\s*", "", str(s)).strip().upper()
+    예: 'L (레귤러핏)' → 'L', 'S/M (크롭핏' → 'S/M'."""
+    return re.sub(r"\s*[\(（].*$", "", str(s)).strip().upper()
 
 @st.cache_data(ttl=300)
 def load_inventory_data(sales_from=None, sales_to=None):
