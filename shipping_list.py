@@ -135,22 +135,34 @@ def load_cafe24():
 def load_external(gc):
     # 파일로 업로드하는 외부몰만 (무신사·지그재그·스마트스토어·Cafe24는 자사몰 API로 일원화)
     FILE_PLATFORMS = {"W컨셉", "29CM", "SSF", "SI Village", "쿠팡"}
-    # 외부몰은 '발송완료' 상태가 없어 오래된 건이 계속 남으므로 '오늘 올린 주문'만
-    # (그날 출고파일 올려 그날 발송 = 오늘 날짜. 전날 건 이미 나갔다고 보고 제외)
-    EXT_START = END.isoformat()
+    # 외부몰은 '발송완료' 상태가 없어, 올린 출고파일 기준으로 최근 2일(오늘+어제)만.
+    # (전날 올려 당일/다음날 발송하는 흐름 포함. 2일보다 오래된 건 이미 나갔다고 보고 제외)
+    EXT_START = (END - timedelta(days=1)).isoformat()
     ws = gc.open_by_key(SHEET_ID).worksheet(PLAT_SHEET)
     rows = ws.get_all_values()[1:]
-    out = []
+    # 같은 (플랫폼·주문일·수령인)은 한 주문(합포장)으로 묶는다
+    from collections import OrderedDict
+    groups = OrderedDict()
+    singles = []
     for r in rows:
-        cells = (r + [""] * 12)[:12]
-        plat, odate, name, code, color, size, qty, price, comm, rev, status, recv = cells
-        if plat not in FILE_PLATFORMS or not (EXT_START <= odate <= END.isoformat()):
+        cells = (r + [""] * 13)[:13]
+        plat, odate, name, code, color, size, qty, price, comm, rev, status, recv, added = cells
+        if plat not in FILE_PLATFORMS:
+            continue
+        # 올린 시각(입력일시) 기준으로 최근 2일; 없으면 주문일로 폴백 (올린 파일은 주문일 무관 포함돼야 함)
+        ref = (added or "")[:10] or odate
+        if not (EXT_START <= ref <= END.isoformat()):
             continue
         if re.match(r"^(취소|반품|C|R)", str(status)):
             continue
-        out.append({"ch": plat, "who": (recv or "").strip() or "-", "dup": False,
-                    "items": [{"name": name, "color": color, "size": size, "qty": int(float(qty or 1))}]})
-    return out
+        who = (recv or "").strip()
+        item = {"name": name, "color": color, "size": size, "qty": int(float(qty or 1))}
+        if who:  # 수령인 있으면 같은 사람 주문끼리 합포장으로 묶음
+            key = (plat, odate, who)
+            groups.setdefault(key, {"ch": plat, "who": who, "dup": False, "items": []})["items"].append(item)
+        else:    # 수령인 없으면 묶을 근거 없어 개별 택배로
+            singles.append({"ch": plat, "who": "-", "dup": False, "items": [item]})
+    return list(groups.values()) + singles
 
 # ── 재고(입고관리) → 현재고 맵 ─────────────────────────────
 def load_stock(gc):

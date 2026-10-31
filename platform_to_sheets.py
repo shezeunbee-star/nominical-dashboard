@@ -44,15 +44,15 @@ def _retry(fn, *args, **kwargs):
 
 ws = _retry(lambda: gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME))
 
-HEADERS = ["플랫폼", "주문일", "상품명", "상품코드", "컬러", "사이즈", "수량", "판매가", "수수료율(%)", "실수익", "주문상태", "수령인"]
+HEADERS = ["플랫폼", "주문일", "상품명", "상품코드", "컬러", "사이즈", "수량", "판매가", "수수료율(%)", "실수익", "주문상태", "수령인", "입력일시"]
 
 def ensure_header():
     first = _retry(lambda: ws.row_values(1))
-    # 그리드가 좁으면 수령인(L열)까지 확장
+    # 그리드가 좁으면 입력일시(M열)까지 확장
     if ws.col_count < len(HEADERS):
         _retry(lambda: ws.add_cols(len(HEADERS) - ws.col_count))
     if not first or first[0] != "플랫폼" or len(first) < len(HEADERS):
-        _retry(lambda: ws.update(values=[HEADERS], range_name="A1:L1"))
+        _retry(lambda: ws.update(values=[HEADERS], range_name="A1:M1"))
         print("  헤더 작성 완료")
 
 def get_existing_keys():
@@ -462,6 +462,8 @@ def main(files):
         print(f"  ✅ {added}건 추가 ({len(rows)-added}건 중복 스킵)")
 
     if all_new:
+        _ts = datetime.now().isoformat(timespec="seconds")   # 업로드(입력) 시각
+        all_new = [row + [_ts] for row in all_new]
         _retry(lambda: ws.append_rows(all_new, value_input_option="USER_ENTERED"))
         print(f"\n🎉 총 {len(all_new)}건 시트에 저장 완료!")
     else:
