@@ -332,7 +332,7 @@ def load_data():
 
     gc = gspread.authorize(creds)
     ws = _open_ws(gc, SHEET_NAME)
-    raw = ws.get("A2:X200", value_render_option="UNFORMATTED_VALUE")
+    raw = ws.get("A2:X", value_render_option="UNFORMATTED_VALUE")
 
     headers = raw[0]
     rows = []
@@ -1573,7 +1573,7 @@ def fill_missing_dates():
         yesterday = date.today() - timedelta(days=1)
 
         # 시트 전체 데이터 읽기 (A~V 칼럼)
-        all_rows = ws.get("A2:V200", value_render_option="UNFORMATTED_VALUE")
+        all_rows = ws.get("A2:V", value_render_option="UNFORMATTED_VALUE")
 
         # 날짜 파싱 함수 (M/D 형식)
         def parse_md(s):
@@ -1798,7 +1798,10 @@ def update_cafe24_yesterday():
         existing_keys = set()
         for row in existing_raw[1:]:
             if len(row) >= 6:
-                existing_keys.add(f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}")
+                # 구매자(L열=idx11)까지 키에 포함 — 같은날·같은SKU를 다른 사람이 사도
+                # 별건으로 집계(과거엔 구매자 누락으로 두번째 건이 중복 처리돼 재고 과다였음)
+                _buyer = row[11] if len(row) > 11 else ""
+                existing_keys.add(f"{row[0]}|{row[1]}|{row[3]}|{row[4]}|{row[5]}|{_buyer}")
 
         new_rows = []
         ga4_events = []  # (order_id, total_revenue, items) — 신규+정상 주문만 모아서 나중에 전송
@@ -1838,7 +1841,7 @@ def update_cafe24_yesterday():
                 _os = str(item.get("order_status", "") or "").strip().upper()[:1]
                 status = {"C": "취소", "R": "반품", "E": "교환", "N": "결제완료"}.get(
                     _os, "취소" if str(order.get("canceled", "")).upper() == "T" else "결제완료")
-                key = f"{platform}|{order_date}|{code}|{color}|{size}"
+                key = f"{platform}|{order_date}|{code}|{color}|{size}|{buyer}"
                 if key not in existing_keys:
                     new_rows.append([platform, order_date, name, code,
                                      color, size, qty, total, comm, profit, status, buyer])
@@ -2031,6 +2034,45 @@ with tab1:
     with c4: kpi_card("누적 매출", fmt_num(total_revenue, "원"), f"ROAS {overall_roas}배", overall_roas >= 3)
     with c5: kpi_card("평균 CPO", f"{avg_cpo:,}원" if avg_cpo else "—", f"전환일 {len(conv_days)}일")
     with c6: kpi_card("신규방문 비율", f"{avg_new_rate}%", f"재방문 {100-avg_new_rate}%")
+
+    # ── 전체 매출 추이 (플랫폼 시트 = 자사몰+외부 전 채널 합산) ──────────
+    # ※ df["매출"](GA4 자사몰)이 아니라 '🏬 플랫폼 매출' 시트 판매가 합계(취소·반품 제외)
+    if not df_platform_all.empty and "판매가" in df_platform_all.columns:
+        _rev = df_platform_all[
+            ~df_platform_all["주문상태"].str.contains("취소|반품", na=False, regex=True)
+        ].copy()
+        if len(df) > 0 and "날짜_dt" in df.columns and df["날짜_dt"].notna().any():
+            _d0, _d1 = df["날짜_dt"].min(), df["날짜_dt"].max()
+            _rev = _rev[(_rev["주문일_dt"] >= _d0) & (_rev["주문일_dt"] <= _d1)]
+        _daily_rev = (_rev.groupby(_rev["주문일_dt"].dt.date)["판매가"].sum()
+                          .reset_index())
+        _daily_rev.columns = ["날짜", "매출"]
+        _daily_rev = _daily_rev.sort_values("날짜")
+        if not _daily_rev.empty:
+            st.markdown("<br>", unsafe_allow_html=True)
+            chart_container("💰 전체 매출 추이",
+                            f"{period_label} · 자사몰+전 플랫폼 합산 (취소·반품 제외)")
+            _fig_rev = go.Figure()
+            _fig_rev.add_trace(go.Bar(
+                x=_daily_rev["날짜"], y=_daily_rev["매출"],
+                marker_color=COLOR["blue"], opacity=0.85, name="일 매출",
+                hovertemplate="%{x|%m/%d}<br>%{y:,.0f}원<extra></extra>"))
+            if len(_daily_rev) >= 4:
+                _ma = _daily_rev["매출"].rolling(7, min_periods=1).mean()
+                _fig_rev.add_trace(go.Scatter(
+                    x=_daily_rev["날짜"], y=_ma, mode="lines", name="7일 이동평균",
+                    line=dict(color=COLOR["orange"], width=2),
+                    hovertemplate="7일평균 %{y:,.0f}원<extra></extra>"))
+            _fig_rev.update_layout(
+                height=300, margin=dict(l=10, r=10, t=10, b=10),
+                plot_bgcolor="white", paper_bgcolor="white",
+                legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0),
+                yaxis=dict(tickformat=",", gridcolor="#F0F0F0"),
+                xaxis=dict(showgrid=False))
+            st.plotly_chart(_fig_rev, use_container_width=True)
+            st.caption(f"기간 합계 매출 {int(_daily_rev['매출'].sum()):,}원 · "
+                       f"일 평균 {int(_daily_rev['매출'].mean()):,}원")
+            st.markdown("---")
 
     # 상품 페이지 통계 (액션 패널·상품 섹션 공용) ── pageTitle 기준
     @st.cache_data(ttl=3600)
