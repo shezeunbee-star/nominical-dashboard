@@ -1860,8 +1860,11 @@ def update_cafe24_yesterday():
             # 날짜순 정렬 후 append
             all_data = [r for r in existing_raw[1:] if r] + new_rows
             all_data.sort(key=lambda r: r[1] if len(r) > 1 else "")
-            ws.resize(rows=1)
-            ws.append_rows([existing_raw[0]] + all_data, value_input_option="USER_ENTERED")
+            # ws.resize(rows=1)은 헤더가 고정(frozen)되어 있으면 "고정 안 된 행 전부 삭제 불가"
+            # 400 에러로 실패 → clear()로 값만 비우고 A1부터 재기록 (grid/frozen 유지)
+            ws.clear()
+            ws.update(values=[existing_raw[0]] + all_data, range_name="A1",
+                      value_input_option="USER_ENTERED")
 
         # GA4에 구매 이벤트 서버사이드 전송 (네이버페이 등 외부결제도 100% 추적)
         ga4_sent = sum(1 for oid, val, its, ots in ga4_events
