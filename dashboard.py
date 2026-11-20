@@ -2047,25 +2047,28 @@ with tab1:
         if len(df) > 0 and "날짜_dt" in df.columns and df["날짜_dt"].notna().any():
             _d0, _d1 = df["날짜_dt"].min(), df["날짜_dt"].max()
             _rev = _rev[(_rev["주문일_dt"] >= _d0) & (_rev["주문일_dt"] <= _d1)]
-        _daily_rev = (_rev.groupby(_rev["주문일_dt"].dt.date)["판매가"].sum()
-                          .reset_index())
-        _daily_rev.columns = ["날짜", "매출"]
-        _daily_rev = _daily_rev.sort_values("날짜")
+        _rev = _rev.copy()
+        _rev["_d"] = _rev["주문일_dt"].dt.date
+        _agg = {"판매가": "sum"}
+        if "실수익" in _rev.columns:
+            _agg["실수익"] = "sum"
+        _daily_rev = (_rev.groupby("_d").agg(_agg).reset_index()
+                          .rename(columns={"_d": "날짜"}).sort_values("날짜"))
         if not _daily_rev.empty:
             st.markdown("<br>", unsafe_allow_html=True)
             chart_container("💰 전체 매출 추이",
-                            f"{period_label} · 자사몰+전 플랫폼 합산 (취소·반품 제외)")
+                            f"{period_label} · GMV(판매가) vs 실수익(수수료 차감 순매출) · 취소·반품 제외")
             _fig_rev = go.Figure()
             _fig_rev.add_trace(go.Bar(
-                x=_daily_rev["날짜"], y=_daily_rev["매출"],
-                marker_color=COLOR["blue"], opacity=0.85, name="일 매출",
-                hovertemplate="%{x|%m/%d}<br>%{y:,.0f}원<extra></extra>"))
-            if len(_daily_rev) >= 4:
-                _ma = _daily_rev["매출"].rolling(7, min_periods=1).mean()
+                x=_daily_rev["날짜"], y=_daily_rev["판매가"],
+                marker_color=COLOR["blue"], opacity=0.85, name="GMV(판매가)",
+                hovertemplate="%{x|%m/%d}<br>GMV %{y:,.0f}원<extra></extra>"))
+            if "실수익" in _daily_rev.columns:
                 _fig_rev.add_trace(go.Scatter(
-                    x=_daily_rev["날짜"], y=_ma, mode="lines", name="7일 이동평균",
-                    line=dict(color=COLOR["orange"], width=2),
-                    hovertemplate="7일평균 %{y:,.0f}원<extra></extra>"))
+                    x=_daily_rev["날짜"], y=_daily_rev["실수익"], mode="lines+markers",
+                    name="실수익(수수료 차감)", line=dict(color=COLOR["orange"], width=2),
+                    marker=dict(size=5),
+                    hovertemplate="실수익 %{y:,.0f}원<extra></extra>"))
             _fig_rev.update_layout(
                 height=300, margin=dict(l=10, r=10, t=10, b=10),
                 plot_bgcolor="white", paper_bgcolor="white",
@@ -2073,8 +2076,9 @@ with tab1:
                 yaxis=dict(tickformat=",", gridcolor="#F0F0F0"),
                 xaxis=dict(showgrid=False))
             st.plotly_chart(_fig_rev, use_container_width=True)
-            st.caption(f"기간 합계 매출 {int(_daily_rev['매출'].sum()):,}원 · "
-                       f"일 평균 {int(_daily_rev['매출'].mean()):,}원")
+            _g = int(_daily_rev["판매가"].sum())
+            _n = int(_daily_rev["실수익"].sum()) if "실수익" in _daily_rev.columns else 0
+            st.caption(f"기간 GMV {_g:,}원 · 실수익 {_n:,}원 · 수수료 {_g - _n:,}원")
             st.markdown("---")
 
     # 상품 페이지 통계 (액션 패널·상품 섹션 공용) ── pageTitle 기준
