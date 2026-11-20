@@ -252,7 +252,7 @@ def build_ga4_events(orders, existing_keys_before):
     for order in orders:
         platform   = market_to_platform(order.get("market_id", "self"))
         order_date = (order.get("order_date") or "")[:10]
-        status     = parse_status(order)
+        status     = "취소" if order.get("canceled") == "T" else "결제완료"
         order_id   = order.get("order_id", "")
         items      = order.get("items", [])
         if not items:
