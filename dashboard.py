@@ -1814,6 +1814,17 @@ def update_cafe24_yesterday():
             order_total = 0
             order_ga4_items = []
             order_has_new = False
+            # 자사몰 쿠폰·할인 반영 (실결제 기준; 적립금·네이버포인트는 매출로 유지)
+            _disc_rate = 0.0
+            if platform == "Cafe24":
+                _aoa = order.get("actual_order_amount") or {}
+                _op  = float(_aoa.get("order_price_amount", 0) or 0)
+                if _op > 0:
+                    _d = sum(float(_aoa.get(k, 0) or 0) for k in (
+                        "coupon_discount_price", "membership_discount_amount",
+                        "set_product_discount_amount", "app_discount_amount",
+                        "market_other_discount_amount"))
+                    _disc_rate = _d / _op
             for item in items:
                 name    = str(item.get("product_name", "-"))
                 code    = str(item.get("product_code", "-"))
@@ -1836,7 +1847,7 @@ def update_cafe24_yesterday():
                 price = int(float(item.get("product_price", 0) or 0))
                 total = price * qty
                 comm  = COMM_CAFE24 if platform == "Cafe24" else COMM_DEFAULT
-                profit = round(total * (1 - comm / 100))
+                profit = round(total * (1 - _disc_rate) * (1 - comm / 100))
                 # 아이템 order_status 접두어로 상태 판별 (C취소/R반품/E교환/N정상)
                 _os = str(item.get("order_status", "") or "").strip().upper()[:1]
                 status = {"C": "취소", "R": "반품", "E": "교환", "N": "결제완료"}.get(

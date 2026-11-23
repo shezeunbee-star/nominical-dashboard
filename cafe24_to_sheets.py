@@ -145,6 +145,20 @@ def item_status(item, order):
         return "결제완료"
     return "취소" if order.get("canceled") == "T" else "결제완료"
 
+def _cafe24_discount_rate(order):
+    """자사몰 주문의 상품 할인율 = (쿠폰+멤버십+세트+앱+기타 할인) / 상품금액.
+    적립금·네이버포인트(points/credits/naver_point)는 매출이므로 제외. 상품금액 0이면 0."""
+    aoa = order.get("actual_order_amount") or {}
+    op  = float(aoa.get("order_price_amount", 0) or 0)
+    if op <= 0:
+        return 0.0
+    disc = sum(float(aoa.get(k, 0) or 0) for k in (
+        "coupon_discount_price", "membership_discount_amount",
+        "set_product_discount_amount", "app_discount_amount",
+        "market_other_discount_amount"))
+    return disc / op
+
+
 def parse_orders(orders):
     rows = []
     for order in orders:
@@ -155,13 +169,16 @@ def parse_orders(orders):
         if not items:
             continue
 
+        # 자사몰 쿠폰·할인 반영 (실결제 기준; 적립금·네이버포인트는 매출로 유지)
+        disc_rate = _cafe24_discount_rate(order) if platform == "Cafe24" else 0.0
+
         for item in items:
             color, size = parse_option(item.get("option_value", ""))
             qty    = int(float(item.get("quantity", 1) or 1))
             price  = int(float(item.get("product_price", 0) or 0))
             total  = price * qty
             comm   = COMMISSION_CAFE24 if platform == "Cafe24" else COMMISSION_DEFAULT
-            profit = round(total * (1 - comm / 100))
+            profit = round(total * (1 - disc_rate) * (1 - comm / 100))
             status = item_status(item, order)
 
             rows.append([
